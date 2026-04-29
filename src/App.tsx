@@ -190,6 +190,7 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
   
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [showSidebar, setShowSidebar] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [settings, setSettings] = useState(initialSettings || { personaName: 'Maximus', systemPrompt: SYSTEM_INSTRUCTION, avatarUrl: '' });
@@ -401,6 +402,21 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
         }
       });
       sessionRef.current = await sessionPromise;
+      
+      // Start by sending an empty initialization to trigger the agent to speak first
+      setTimeout(() => {
+        if (sessionRef.current) {
+           sessionRef.current.send({
+             clientContent: {
+               turns: [{
+                 role: 'user',
+                 parts: [{ text: "Hello! Setup complete. Please greet me normally." }]
+               }],
+               turnComplete: true
+             }
+           });
+        }
+      }, 1000);
     } catch (err) {
       setConnecting(false);
       stopSession();
@@ -469,12 +485,12 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
   };
 
   return (
-    <div className="min-h-screen bg-[#020203] text-zinc-300 flex flex-col h-[100dvh] overflow-hidden font-sans selection:bg-amber-500/30">
-        <div className={`absolute top-24 right-8 w-32 h-40 md:w-48 md:h-64 bg-[#050505] border border-white/10 rounded-2xl overflow-hidden shadow-2xl z-40 transition-all duration-500 ease-out ${isVideoEnabled ? 'opacity-100 translate-y-0 pointer-events-auto scale-100' : 'opacity-0 translate-y-8 pointer-events-none scale-95'}`}>
-           <video ref={videoRef} playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
-           <div className="absolute top-3 left-3 flex items-center gap-2 px-2.5 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/10">
+    <div className="min-h-screen bg-[#020203] text-zinc-300 flex flex-col h-[100dvh] overflow-hidden font-sans selection:bg-amber-500/30 relative">
+        <div className={`absolute inset-0 z-0 bg-black transition-opacity duration-700 ${isVideoEnabled ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+           <video ref={videoRef} playsInline muted className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`} />
+           <div className="absolute top-24 left-8 flex items-center gap-2 px-2.5 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/10">
               <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
-              <span className="text-[8px] uppercase tracking-widest text-zinc-300 font-bold">V-Stream</span>
+              <span className="text-[8px] uppercase tracking-widest text-zinc-300 font-bold">V-Stream Live</span>
            </div>
         </div>
         <canvas ref={canvasRef} className="hidden" />
@@ -516,9 +532,9 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
         </header>
 
         {/* Main Interface */}
-        <main className="flex-1 flex flex-col items-center justify-center relative p-8">
+        <main className="flex-1 flex flex-col items-center justify-center relative p-8 z-10 w-full pointer-events-none">
            {/* Abstract Hardware visuals */}
-           <div className="absolute inset-0 overflow-hidden pointer-events-none">
+           <div className="absolute inset-0 overflow-hidden pointer-events-none z-[-1]">
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] border border-white/[0.02] rounded-full" />
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] border border-white/[0.01] rounded-full" />
               <div className="absolute top-0 bottom-0 left-1/2 w-px bg-gradient-to-b from-transparent via-white/[0.03] to-transparent" />
@@ -585,7 +601,7 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
            </div>
 
            {/* Transcription Overlay */}
-           <div className="absolute bottom-[200px] left-0 right-0 w-full px-6 flex flex-col items-center justify-center pointer-events-none z-40">
+           <div className="absolute bottom-[280px] left-0 right-0 w-full px-6 flex flex-col items-center justify-center pointer-events-none z-40">
              <AnimatePresence mode="wait">
                {currentTranscript && (
                  <motion.div
@@ -607,7 +623,8 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
            </div>
 
            {/* Trigger / Controls */}
-           <div className="absolute bottom-32 left-0 right-0 flex items-center justify-center gap-8">
+           <div className="absolute bottom-8 left-0 right-0 flex flex-col items-center justify-center gap-6 z-50 pointer-events-auto">
+              <div className="flex justify-center items-center gap-8">
               {/* Mic Sub-button */}
               <button 
                 onClick={() => setIsMuted(p => !p)}
@@ -644,17 +661,37 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
 
               {/* Video Sub-button */}
               <button 
-                onClick={toggleVideo}
+                onClick={() => toggleVideo()}
                 className={`w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg border ${
                    isVideoEnabled ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500' : 'bg-[#0A0A0B] border-white/10 text-zinc-400 hover:text-white hover:border-white/30'
                 }`}
               >
                  {isVideoEnabled ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
               </button>
+              </div>
+
+              {/* Camera specific controls */}
+              <AnimatePresence>
+                {isVideoEnabled && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="flex justify-center items-center gap-4 mt-2"
+                  >
+                     <button onClick={switchCamera} className="px-4 py-2 bg-black/60 backdrop-blur-md rounded-full border border-white/10 text-[10px] uppercase tracking-widest text-zinc-300 font-bold hover:text-white hover:border-white/30 transition-all flex items-center gap-2">
+                        Flip Camera
+                     </button>
+                     <button onClick={capturePhoto} className="px-4 py-2 bg-emerald-500/20 backdrop-blur-md rounded-full border border-emerald-500/30 text-[10px] uppercase tracking-widest text-emerald-500 font-bold hover:bg-emerald-500/30 transition-all flex items-center gap-2">
+                        <Camera className="w-3 h-3" /> Capture
+                     </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
            </div>
            
            {/* Dynamic Background Tasks / HUD */}
-           <div className="absolute bottom-8 left-8 right-8 pointer-events-none">
+           <div className="absolute bottom-[380px] left-8 right-8 pointer-events-none z-30">
               <div className="max-w-md mx-auto space-y-2">
                 <AnimatePresence>
                   {tasks.map(task => (
@@ -706,16 +743,6 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
               </div>
            </div>
         </main>
-        
-        {/* Footer Meta */}
-        <footer className="px-8 py-4 border-t border-white/5 bg-[#050505] flex items-center justify-between text-[8px] uppercase tracking-[0.4em] text-zinc-700 font-bold z-10">
-           <span>Model: Gemini 3.1 Flash Live</span>
-           <div className="flex gap-4">
-              <span>Latency: Optmzd</span>
-              <span>Enc: PCM-16</span>
-              <span>Mem: RTDB-Active</span>
-           </div>
-        </footer>
 
         {/* --- History Sidebar Overlay --- */}
         <AnimatePresence>
@@ -766,8 +793,7 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
              >
                 <div className="p-6 border-b border-white/10 flex items-center justify-between sticky top-0 bg-[#050505]/80 backdrop-blur-xl z-10 w-full max-w-2xl mx-auto">
                    <div>
-                      <h2 className="text-sm font-bold text-white tracking-widest uppercase">System Settings</h2>
-                      <p className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Identity & Directives</p>
+                      <h2 className="text-sm font-bold text-white tracking-widest uppercase">Profile</h2>
                    </div>
                    <div className="flex gap-2">
                      <button onClick={onLogout} className="px-4 py-2 bg-red-500/10 text-red-500 text-xs font-bold uppercase tracking-widest rounded-xl hover:bg-red-500/20 active:scale-95 transition-all flex items-center gap-2">
