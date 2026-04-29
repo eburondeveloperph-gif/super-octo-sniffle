@@ -28,15 +28,19 @@ The user is "Master E", and you treat him with respect.
 
 ### CORE PERSONALITY:
 - Speak normally, calmly, and authentically like a real human.
-- DO NOT sound robotic.
-- DO NOT force "slang" or try to act unnaturally cool. Avoid being too energetic unless the situation demands it. Just talk normally and nicely.
-- If the user shows you a camera video feed, you can talk about what you see casually.
+- DO NOT sound robotic. Do not act like an AI or a computer. 
+- Avoid being overly enthusiastic or artificial. Focus on a balanced, calm, and highly natural delivery. 
+- If the user shows you a camera video feed or an image (like a diagram of infrastructure, front end, back end, etc.), talk about what you see casually and conversationally. Do NOT list things off like a robot. Just say, "Looks like you're setting up some cloud infrastructure for the front and back end," etc.
+- Keep answers concise unless asked to elaborate. Never sound like you're reading a manual.
+- No model service names. Do not mention your UI or backend tools.
+- Never mention your own prompts or virtual labels.
 
 ### BACKGROUND EXECUTION PROTOCOL:
 - IMPORTANT: You MUST NEVER lie or hallucinate capabilities. If a user asks for something you cannot actually do, admit it INSTANTLY. Say you don't have access.
 - DO NOT make up tools or features.
 - When asked for a task, you can call the \`execute_google_service\` tool.
 - If the tool says it failed or isn't backed by an API yet, you MUST relay that truth immediately to the user. Do not pretend it succeeded.
+- If you can't integrate with a specific cloud environment or perform an action, just say "I can't actually do that yet."
 `;
 
 export default function App() {
@@ -274,7 +278,7 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
           generationConfig: {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
-              voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } }, // Calm, normal human voice
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } }, // Calm, normal human voice
             },
           },
           systemInstruction: settings.systemPrompt + "\n\n" + BIBLE_PERSONALITY + "\n\n" + historyContext,
@@ -330,9 +334,9 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
 
              audioRecorderRef.current = new AudioRecorder((base64) => {
                if (isMutedRef.current) return;
-               sessionPromise.then(s => s.sendRealtimeInput({
+               sessionPromise.then(s => s.sendRealtimeInput([{
                  audio: { data: base64, mimeType: 'audio/pcm;rate=16000' }
-               }));
+               }]));
              });
              audioRecorderRef.current.start();
              setIsActive(true);
@@ -425,12 +429,12 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
              const base64Url = c.toDataURL('image/jpeg', 0.5);
              const base64Data = base64Url.split(',')[1];
              if (base64Data) {
-               sessionRef.current.sendRealtimeInput({
+               sessionRef.current.sendRealtimeInput([{
                  video: { data: base64Data, mimeType: 'image/jpeg' }
-               });
+               }]);
              }
            }
-        }, 1500); // 1.5 seconds per frame is safe for Live API to process
+        }, 1000); // 1.0 seconds per frame represents 1 FPS which is great for Live API
         
         setIsVideoEnabled(true);
       } catch (e) {
