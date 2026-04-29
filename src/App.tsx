@@ -580,9 +580,9 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
         </header>
 
         {/* Main Interface */}
-        <main className="flex-1 flex flex-col items-center justify-center relative p-8 z-10 w-full pointer-events-none">
+        <main className="flex-1 flex flex-col items-center justify-start pt-20 relative p-8 z-10 w-full pointer-events-none">
            {/* Abstract Hardware visuals */}
-           <div className="absolute inset-0 overflow-hidden pointer-events-none z-[-1]">
+           <div className="absolute inset-0 overflow-hidden pointer-events-none z-[-1] -translate-y-20">
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] border border-white/[0.02] rounded-full" />
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] border border-white/[0.01] rounded-full" />
               <div className="absolute top-0 bottom-0 left-1/2 w-px bg-gradient-to-b from-transparent via-white/[0.03] to-transparent" />
