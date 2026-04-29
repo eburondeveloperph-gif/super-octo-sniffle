@@ -2,7 +2,6 @@ export class AudioStreamer {
   private audioContext: AudioContext | null = null;
   private source: AudioBufferSourceNode | null = null;
   private queue: Float32Array[] = [];
-  private isPlaying = false;
   private sampleRate = 24000;
   private scheduledTime = 0;
 
@@ -31,37 +30,30 @@ export class AudioStreamer {
         float32Array[i] = int16 / (int16 < 0 ? 0x8000 : 0x7FFF);
     }
     this.queue.push(float32Array);
-    if (!this.isPlaying) {
-      this.playNext();
-    }
+    this.scheduleNext();
   }
 
-  private playNext() {
-    if (!this.audioContext || this.queue.length === 0) {
-      this.isPlaying = false;
-      return;
+  private scheduleNext() {
+    if (!this.audioContext) return;
+    
+    while (this.queue.length > 0) {
+      const chunk = this.queue.shift()!;
+      const audioBuffer = this.audioContext.createBuffer(1, chunk.length, this.sampleRate);
+      audioBuffer.getChannelData(0).set(chunk);
+      
+      const source = this.audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(this.audioContext.destination);
+      
+      const currentTime = this.audioContext.currentTime;
+      if (this.scheduledTime < currentTime) {
+        this.scheduledTime = currentTime;
+      }
+      
+      source.start(this.scheduledTime);
+      this.scheduledTime += audioBuffer.duration;
+      this.source = source; // keep last source for stop()
     }
-    this.isPlaying = true;
-    const chunk = this.queue.shift()!;
-    const audioBuffer = this.audioContext.createBuffer(1, chunk.length, this.sampleRate);
-    audioBuffer.getChannelData(0).set(chunk);
-    
-    this.source = this.audioContext.createBufferSource();
-    this.source.buffer = audioBuffer;
-    this.source.connect(this.audioContext.destination);
-    
-    const currentTime = this.audioContext.currentTime;
-    if (this.scheduledTime < currentTime) {
-      this.scheduledTime = currentTime;
-    }
-    
-    this.source.start(this.scheduledTime);
-    this.scheduledTime += audioBuffer.duration;
-    
-    // Play next seamlessly, not perfect but avoids large gaps
-    setTimeout(() => {
-        this.playNext();
-    }, (audioBuffer.duration * 1000) - 20); 
   }
 
   stop() {
@@ -71,7 +63,6 @@ export class AudioStreamer {
         this.source.stop();
       } catch (e) {}
     }
-    this.isPlaying = false;
     this.scheduledTime = 0;
   }
 }

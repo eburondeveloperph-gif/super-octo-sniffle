@@ -275,10 +275,10 @@ function MaximusAgent({ user, onLogout, initialSettings }: { user: User, onLogou
       await audioStreamerRef.current?.init(24000);
       
       const sessionPromise = aiRef.current.live.connect({
-        model: "gemini-3.1-flash-live-preview",
+        model: "gemini-2.0-flash-exp",
         config: {
           generationConfig: {
-            responseModalities: [Modality.AUDIO],
+            responseModalities: [Modality.AUDIO, Modality.TEXT],
             speechConfig: {
               voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } }, // Best human normal voice for Male
             },
