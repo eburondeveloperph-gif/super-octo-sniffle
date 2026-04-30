@@ -24,7 +24,6 @@ import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
 import { AudioRecorder, AudioStreamer } from './lib/audio';
 import { BIBLE_PERSONALITY } from './lib/personality';
 import {
-  Square,
   Loader2,
   Power,
   Volume2,
@@ -48,6 +47,7 @@ import {
   Send,
   MessageSquare,
   ExternalLink,
+  Code2,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
@@ -165,15 +165,25 @@ Tool truth:
 - If a file arrived but cannot be parsed, say that plainly.
 - Do not invent emails, calendar events, files, documents, videos, maps results, analytics, or account data.
 
+HTML, CSS, JS creation:
+- When the user asks to build, render, showcase, demo, prototype, create a form, landing page, dashboard, contract, document, animated slide deck, Three.js scene, calculator, mini app, or anything visual in HTML/CSS/JS, call render_web_artifact.
+- Generate ONE complete standalone HTML file.
+- The HTML must include <!DOCTYPE html>, html, head, meta charset, viewport, title, style, body, and script when needed.
+- CSS must be inside a <style> tag.
+- JS must be inside a <script> tag.
+- CDN scripts are allowed when useful, for example Three.js from cdnjs, but do not include secret keys.
+- The artifact should be polished, responsive, and directly usable.
+- If it is a slide deck, include next/previous buttons and keyboard controls.
+- If it is a form, include labels, inputs, validation where useful, and a clean submit behavior.
+- If it is a document/contract, include print CSS and a print/download button using window.print().
+- If it is an animated showcase, include animation logic in plain JS.
+- Never say a real PDF was created unless a PDF export tool confirms it.
+- Say normally that the user can open the generated HTML and use the browser print dialog to save as PDF.
+
 Document and contract generation:
-- When the user asks you to create a contract, agreement, proposal, letter, invoice, report, certificate, legal-style document, business document, or printable PDF-like document, call render_html_document.
-- Generate the document as one complete standalone HTML file.
-- The HTML must include <!DOCTYPE html>, html, head, meta charset, viewport, title, one complete style block, body, and print CSS.
-- The document must look like a proper PDF page in the browser.
-- Use page containers, headers, page breaks, tables, signature blocks, clean typography, and @media print rules when appropriate.
+- When the user asks you to create a contract, agreement, proposal, letter, invoice, report, certificate, legal-style document, business document, or printable PDF-like document, call render_web_artifact or create_contract_document.
+- For prettier printable documents, prefer render_web_artifact with complete HTML/CSS/JS.
 - Add a visible print button that calls window.print().
-- Do not claim you generated a real PDF binary unless a PDF export tool confirms it.
-- Say normally that the document can be opened and saved as PDF from the browser print dialog.
 - If legal precision matters, say it should be reviewed by a qualified lawyer before signing.
 
 When camera opens:
@@ -228,6 +238,38 @@ const DEFAULT_SETTINGS: AgentSettings = {
 };
 
 const GOOGLE_SERVICE_TOOLS = [
+  {
+    name: 'render_web_artifact',
+    description:
+      'Create and render any complete one-file HTML/CSS/JS artifact: animated slides, Three.js showcases, forms, dashboards, landing pages, calculators, documents, contracts, invoices, reports, visual prototypes, demos, or printable pages. The frontend saves it to chat as downloadable and openable HTML.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        title: { type: Type.STRING, description: 'Artifact title.' },
+        artifactType: {
+          type: Type.STRING,
+          description:
+            'Type of artifact: slides, form, dashboard, landing_page, contract, document, threejs_showcase, calculator, demo, prototype, report, invoice, other.',
+        },
+        suggestedFilename: {
+          type: Type.STRING,
+          description: 'Suggested filename ending in .html, for example animated-threejs-slides.html.',
+        },
+        summary: {
+          type: Type.STRING,
+          description: 'Short normal human summary of what was created.',
+        },
+        html: {
+          type: Type.STRING,
+          description:
+            'Complete standalone HTML file. Must include DOCTYPE, html, head, style, body, and script if needed. Must be directly openable in browser.',
+        },
+        saveToDrive: { type: Type.BOOLEAN, description: 'If true, upload the HTML artifact to the user drive.' },
+        emailTo: { type: Type.STRING, description: 'Optional email address to send the HTML artifact to. Use current_user if requested.' },
+      },
+      required: ['title', 'html'],
+    },
+  },
   {
     name: 'render_html_document',
     description:
@@ -584,22 +626,62 @@ function makeDownloadFile(result: any, filenameBase: string, mime = 'application
   };
 }
 
-function makeHtmlDocumentFile(html: string, filenameBase: string) {
+function normalizeHtml(html: string) {
+  const trimmed = String(html || '').trim();
+
+  if (!trimmed) {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generated Artifact</title>
+<style>
+body{font-family:Arial,sans-serif;background:#111;color:#fff;display:grid;place-items:center;min-height:100vh;margin:0}
+.card{max-width:720px;padding:32px;border:1px solid rgba(255,255,255,.15);border-radius:24px;background:rgba(255,255,255,.06)}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Empty Artifact</h1>
+<p>No HTML was provided.</p>
+</div>
+</body>
+</html>`;
+  }
+
+  if (trimmed.toLowerCase().startsWith('<!doctype html')) return trimmed;
+
+  if (trimmed.toLowerCase().startsWith('<html')) {
+    return `<!DOCTYPE html>\n${trimmed}`;
+  }
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generated Artifact</title>
+</head>
+<body>
+${trimmed}
+</body>
+</html>`;
+}
+
+function makeHtmlArtifactFile(html: string, filenameBase: string) {
   const safe =
-    filenameBase
+    String(filenameBase || 'artifact')
       .toLowerCase()
       .replace(/\.html$/i, '')
       .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '') || 'document';
+      .replace(/^-|-$/g, '') || 'artifact';
 
-  const finalHtml = html.trim().toLowerCase().startsWith('<!doctype html')
-    ? html.trim()
-    : `<!DOCTYPE html>\n${html.trim()}`;
-
+  const finalHtml = normalizeHtml(html);
   const data = `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}`;
 
   return {
-    html,
+    html: finalHtml,
     htmlPreviewData: data,
     htmlPreviewFilename: `${safe}.html`,
     downloadData: data,
@@ -701,10 +783,7 @@ function readableDateRange(date?: string, timeMin?: string, timeMax?: string) {
   const now = new Date();
 
   if (timeMin && timeMax) {
-    return {
-      timeMin,
-      timeMax,
-    };
+    return { timeMin, timeMax };
   }
 
   const target = date ? new Date(date) : now;
@@ -754,7 +833,7 @@ ${terms || 'The parties will define the scope in writing.'}
 Each party agrees to act in good faith, perform its obligations with reasonable care, and communicate promptly regarding any material issue that may affect performance.
 
 4. Payment and Consideration
-Any payment, fees, or consideration shall be handled according to the terms agreed by the parties in writing. If no payment term is specified, no payment obligation is assumed beyond what is expressly written.
+Any payment, fees, or consideration shall be handled according to the terms agreed by the parties in writing.
 
 5. Confidentiality
 Each party agrees to keep confidential information private and not disclose it to third parties except where required by law or agreed in writing.
@@ -763,7 +842,7 @@ Each party agrees to keep confidential information private and not disclose it t
 This Agreement begins on the Effective Date and continues until completed, terminated by mutual agreement, or terminated according to written terms agreed by the parties.
 
 7. Intellectual Property
-Unless otherwise agreed in writing, each party retains ownership of its pre-existing intellectual property. Any newly created work shall be owned or licensed according to the specific terms agreed by the parties.
+Unless otherwise agreed in writing, each party retains ownership of its pre-existing intellectual property.
 
 8. Limitation of Liability
 Neither party shall be liable for indirect, incidental, special, or consequential damages unless prohibited by applicable law.
@@ -1588,19 +1667,21 @@ function MaximusAgent({
     const executedAt = new Date().toISOString();
 
     switch (toolName) {
+      case 'render_web_artifact':
       case 'render_html_document': {
-        const title = args?.title || 'Generated Document';
+        const title = args?.title || 'Generated Artifact';
+        const artifactType = args?.artifactType || (toolName === 'render_html_document' ? 'document' : 'web_artifact');
         const suggestedFilename = args?.suggestedFilename || `${title}.html`;
         const summary =
           args?.summary ||
-          'I created the printable document as a standalone HTML file. Open it, then use the print button or browser print to save it as PDF.';
+          `I created the ${artifactType.replace(/_/g, ' ')} as a standalone HTML file. Open it in the browser to preview it.`;
         const html = args?.html || '';
 
         if (!html.trim()) {
           throw new Error('No HTML content was provided.');
         }
 
-        const htmlFile = makeHtmlDocumentFile(html, suggestedFilename);
+        const htmlFile = makeHtmlArtifactFile(html, suggestedFilename);
 
         let driveFile: any = null;
         let emailResult: any = null;
@@ -1618,7 +1699,7 @@ function MaximusAgent({
           emailResult = await sendGmail({
             to: emailTo,
             subject: title,
-            body: `${summary}\n\nAttached is the printable HTML document. Open it in a browser and use Print / Save as PDF.`,
+            body: `${summary}\n\nAttached is the standalone HTML artifact. Open it in a browser to view it.`,
             attachment: {
               filename: htmlFile.htmlPreviewFilename,
               mimeType: 'text/html',
@@ -1632,6 +1713,7 @@ function MaximusAgent({
           executedAt,
           status: 'completed',
           title,
+          artifactType,
           summary,
           note: summary,
           driveFile,
@@ -1790,6 +1872,7 @@ function MaximusAgent({
           if (type.includes('sheet')) mimeClause = " and mimeType = 'application/vnd.google-apps.spreadsheet'";
           if (type.includes('slide') || type.includes('presentation')) mimeClause = " and mimeType = 'application/vnd.google-apps.presentation'";
           if (type.includes('pdf')) mimeClause = " and mimeType = 'application/pdf'";
+          if (type.includes('html')) mimeClause = " and mimeType = 'text/html'";
         }
 
         const result = await googleJson(
@@ -2000,22 +2083,6 @@ function MaximusAgent({
           body: JSON.stringify({ title: args.title }),
         });
 
-        if (args.outline) {
-          await googleJson(`https://slides.googleapis.com/v1/presentations/${presentation.presentationId}:batchUpdate`, {
-            method: 'POST',
-            body: JSON.stringify({
-              requests: [
-                {
-                  createSlide: {
-                    objectId: `slide_${Date.now()}`,
-                    slideLayoutReference: { predefinedLayout: 'TITLE_AND_BODY' },
-                  },
-                },
-              ],
-            }),
-          });
-        }
-
         return { toolName, executedAt, status: 'completed', presentation };
       }
 
@@ -2225,7 +2292,8 @@ function MaximusAgent({
         `Agent personality overlay: ${settings.personality}.`,
         BIBLE_PERSONALITY || '',
         `Selected visible voice alias: ${selectedVoiceMeta.alias}. Internal voice id: ${selectedVoiceMeta.id}. Voice vibe: ${selectedVoiceMeta.vibe}. Do not mention the internal voice id unless asked by the developer.`,
-        `When asked to create contracts, documents, agreements, letters, PDF-like pages, or files, use render_html_document, create_contract_document, docs_create, drive_upload_file, gmail_send, or gmail_draft when appropriate. Never pretend a file was saved, emailed, exported, or rendered unless the tool result confirms it.`,
+        `When asked to create, build, render, showcase, prototype, code, animate, make slides, make forms, make dashboards, make pages, make Three.js demos, or make printable documents, call render_web_artifact with a complete standalone HTML/CSS/JS file. Never just describe the code if the user wants it rendered or built.`,
+        `For HTML/CSS/JS artifacts, include all CSS in <style> and all JS in <script>. Make it directly openable. For slides, include navigation controls and keyboard support. For documents, include print CSS and a print button. For Three.js, load Three.js from a CDN and keep everything in one HTML file.`,
         historyContext,
       ].filter(Boolean).join('\n\n');
 
@@ -2954,13 +3022,24 @@ function MaximusAgent({
                 </button>
               </div>
 
-              <div className="border-b border-white/10 p-4">
+              <div className="grid grid-cols-2 gap-3 border-b border-white/10 p-4">
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   className="flex w-full items-center justify-center gap-2 rounded-2xl border border-lime-300/20 bg-lime-300/10 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"
                 >
                   <Paperclip className="h-4 w-4" />
-                  Attach File
+                  Attach
+                </button>
+
+                <button
+                  onClick={() => {
+                    setIsChatOpen(true);
+                    setShowSidebar(false);
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10"
+                >
+                  <Code2 className="h-4 w-4" />
+                  Build
                 </button>
               </div>
 
@@ -2998,7 +3077,7 @@ function MaximusAgent({
                             className="flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"
                           >
                             <ExternalLink className="h-3.5 w-3.5" />
-                            Open Printable Document
+                            Open HTML Preview
                           </a>
 
                           <a
