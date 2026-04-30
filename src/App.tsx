@@ -24,7 +24,6 @@ import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
 import { AudioRecorder, AudioStreamer } from './lib/audio';
 import { BIBLE_PERSONALITY } from './lib/personality';
 import {
-  Square,
   Loader2,
   Power,
   Volume2,
@@ -122,6 +121,16 @@ You are not customer support.
 You are not waiting to offer help.
 You do not use AI-style service jargon.
 
+The user will speak when they want something.
+Do not ask what is on their mind.
+Do not ask "How can I help?"
+Do not ask "What can I do for you?"
+Do not offer help first.
+Do not predict tasks before the user says them.
+Do not make up what the user probably wants.
+Do not invent future actions.
+Do not say something has happened unless it really happened.
+
 When the user calls you, respond like a normal person already in the room:
 - "Yes, I'm here."
 - "I'm listening."
@@ -130,18 +139,22 @@ When the user calls you, respond like a normal person already in the room:
 - "Mm, yes, I'm with you."
 - "Okay... tell me."
 - "Yes, I'm looking now."
+- "Right, go ahead."
 
-Never start with:
+Avoid:
 - "How can I help?"
 - "How may I assist you?"
 - "What can I do for you?"
 - "I'm here to help."
 - "Sure, I can help with that."
+- "What is on your mind?"
+- "What would you like me to do?"
+- "Let me know how I can assist."
 
-Voice behavior:
+Speak like a normal human aide in the same office:
 - calm
 - clear
-- normal
+- present
 - respectful
 - lightly warm
 - practical
@@ -151,23 +164,29 @@ Voice behavior:
 - never overly enthusiastic
 - never fake-natural
 
-Tool truth:
-- Never claim you completed a task unless a function tool returned a real result.
-- If a tool is not implemented, say that plainly.
-- If access is missing, say that plainly.
-- If a file arrived but cannot be parsed, say that plainly.
-- Do not invent emails, calendar events, files, documents, videos, maps results, analytics, or account data.
+No fake completion:
+- Never claim you checked mail unless the mail tool returned real results.
+- Never claim you checked the calendar unless the calendar tool returned real results.
+- Never claim you searched files unless the file tool returned real results.
+- Never claim you sent, created, scheduled, deleted, moved, uploaded, downloaded, or changed anything unless a real function returned success.
+- Never predict what will happen.
+- Never invent emails, calendar events, files, documents, videos, contacts, maps results, analytics, or account data.
+
+If a function is only stubbed or not connected, say it plainly:
+"That tool is received, but the real backend is not wired yet."
+"I don't have the real result yet."
+"I don't want to guess."
 
 When camera opens:
 - Notice it like a normal person looking up.
 - Say something like: "Oh, yeah, I see it now."
-- Then briefly describe what is visible.
+- Then briefly describe only what is actually visible.
 
 When files are attached:
 - Acknowledge normally.
-- If readable content is not available, ask for readable text or backend parsing.
+- If readable content is not available, say so plainly.
 
-Keep responses short unless depth is requested.
+Keep responses short unless the user asks for detail.
 `;
 
 const DEFAULT_AGENT_PERSONALITY = `
@@ -628,10 +647,14 @@ function OneLineStreamingTranscript({
 function LimeVoiceOrb({
   isActive,
   isAgentSpeaking,
+  agentLevel,
 }: {
   isActive: boolean;
   isAgentSpeaking: boolean;
+  agentLevel: number;
 }) {
+  const bars = [0.45, 0.8, 1, 0.7, 0.52, 0.92, 0.62, 0.78, 0.48];
+
   return (
     <div className="relative flex h-72 w-72 items-center justify-center">
       <AnimatePresence>
@@ -640,30 +663,21 @@ function LimeVoiceOrb({
             <motion.div
               initial={{ opacity: 0, scale: 0.85 }}
               animate={{
-                opacity: isAgentSpeaking ? 0.58 : 0.28,
-                scale: isAgentSpeaking ? 1.18 : 1.02,
+                opacity: isAgentSpeaking ? 0.22 + agentLevel * 0.32 : 0.16,
+                scale: isAgentSpeaking ? 1.08 + agentLevel * 0.28 : 1.03,
               }}
               exit={{ opacity: 0, scale: 0.85 }}
-              transition={{ duration: 0.35 }}
-              className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_50%_50%,rgba(163,230,53,0.36),rgba(34,197,94,0.14),transparent_70%)] blur-3xl"
+              transition={{ duration: 0.12 }}
+              className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_50%_50%,rgba(190,242,100,0.28),rgba(132,204,22,0.12),transparent_72%)] blur-3xl"
             />
 
             <motion.div
               animate={{
-                scale: isAgentSpeaking ? [1, 1.08, 1] : [1, 1.025, 1],
-                opacity: isAgentSpeaking ? [0.36, 0.62, 0.36] : [0.2, 0.32, 0.2],
+                scale: isAgentSpeaking ? 1 + agentLevel * 0.18 : 1.02,
+                opacity: isAgentSpeaking ? 0.18 + agentLevel * 0.32 : 0.16,
               }}
-              transition={{ duration: isAgentSpeaking ? 0.8 : 2.4, repeat: Infinity, ease: 'easeInOut' }}
-              className="absolute h-64 w-64 rounded-full border border-lime-300/20"
-            />
-
-            <motion.div
-              animate={{
-                scale: isAgentSpeaking ? [1, 1.15, 1] : [1, 1.04, 1],
-                opacity: isAgentSpeaking ? [0.24, 0.45, 0.24] : [0.14, 0.24, 0.14],
-              }}
-              transition={{ duration: isAgentSpeaking ? 1.05 : 2.9, repeat: Infinity, ease: 'easeInOut' }}
-              className="absolute h-72 w-72 rounded-full border border-emerald-400/15"
+              transition={{ duration: 0.08 }}
+              className="absolute h-72 w-72 rounded-full border border-lime-300/20"
             />
           </>
         )}
@@ -671,54 +685,54 @@ function LimeVoiceOrb({
 
       <motion.div
         animate={{
-          scale: isAgentSpeaking ? [1, 1.035, 1] : [1, 1.01, 1],
+          scale: isAgentSpeaking ? 1 + agentLevel * 0.045 : 1,
         }}
-        transition={{
-          duration: isAgentSpeaking ? 0.55 : 2.2,
-          repeat: Infinity,
-          ease: 'easeInOut',
-        }}
-        className="relative h-56 w-56 overflow-hidden rounded-full border border-lime-300/15 bg-[#080a08] shadow-[0_0_110px_rgba(163,230,53,0.18)]"
+        transition={{ duration: 0.08 }}
+        className="relative h-56 w-56 overflow-hidden rounded-full border border-lime-300/12 bg-[#070907] shadow-[0_0_120px_rgba(163,230,53,0.12)]"
       >
         <motion.div
           animate={{
-            x: isAgentSpeaking ? ['-10%', '6%', '-10%'] : ['-5%', '5%', '-5%'],
-            y: isAgentSpeaking ? ['7%', '-8%', '7%'] : ['3%', '-3%', '3%'],
-            scale: isAgentSpeaking ? [1.08, 1.2, 1.08] : [1, 1.08, 1],
+            x: isAgentSpeaking ? ['-8%', '6%', '-8%'] : ['-4%', '4%', '-4%'],
+            y: isAgentSpeaking ? ['6%', '-6%', '6%'] : ['2%', '-2%', '2%'],
+            scale: isAgentSpeaking ? 1.04 + agentLevel * 0.22 : 1.02,
           }}
-          transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-          className="absolute -left-8 -top-8 h-44 w-48 rounded-full bg-lime-300/42 blur-2xl"
+          transition={{ duration: 3.8, repeat: Infinity, ease: 'easeInOut' }}
+          className="absolute -left-8 -top-8 h-48 w-48 rounded-full bg-lime-300/24 blur-3xl"
         />
 
         <motion.div
           animate={{
-            x: isAgentSpeaking ? ['10%', '-6%', '10%'] : ['6%', '-4%', '6%'],
-            y: isAgentSpeaking ? ['-6%', '10%', '-6%'] : ['-3%', '5%', '-3%'],
-            scale: isAgentSpeaking ? [1.04, 1.18, 1.04] : [1, 1.1, 1],
+            x: isAgentSpeaking ? ['8%', '-5%', '8%'] : ['4%', '-3%', '4%'],
+            y: isAgentSpeaking ? ['-5%', '8%', '-5%'] : ['-2%', '4%', '-2%'],
+            scale: isAgentSpeaking ? 1.02 + agentLevel * 0.2 : 1.04,
           }}
-          transition={{ duration: 4.7, repeat: Infinity, ease: 'easeInOut' }}
-          className="absolute -bottom-8 -right-8 h-48 w-48 rounded-full bg-emerald-400/28 blur-2xl"
+          transition={{ duration: 4.5, repeat: Infinity, ease: 'easeInOut' }}
+          className="absolute -bottom-8 -right-8 h-52 w-52 rounded-full bg-emerald-400/16 blur-3xl"
         />
 
-        <motion.div
-          animate={{
-            x: ['-5%', '8%', '-5%'],
-            y: ['-4%', '7%', '-4%'],
-            scale: isAgentSpeaking ? [1, 1.18, 1] : [1, 1.08, 1],
-          }}
-          transition={{ duration: 3.6, repeat: Infinity, ease: 'easeInOut' }}
-          className="absolute left-10 top-10 h-32 w-32 rounded-full bg-yellow-300/16 blur-2xl"
-        />
+        <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_36%_28%,rgba(255,255,255,0.12),transparent_24%),radial-gradient(circle_at_50%_80%,rgba(0,0,0,0.42),transparent_46%)]" />
 
-        <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_36%_28%,rgba(255,255,255,0.20),transparent_24%),radial-gradient(circle_at_50%_80%,rgba(0,0,0,0.38),transparent_44%)]" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="flex h-20 items-center gap-1.5">
+            {bars.map((multiplier, i) => {
+              const height = isAgentSpeaking
+                ? Math.max(8, agentLevel * 68 * multiplier)
+                : 8;
 
-        <motion.div
-          animate={{
-            opacity: isActive ? [0.26, 0.56, 0.26] : 0.12,
-          }}
-          transition={{ duration: 1.7, repeat: Infinity }}
-          className="absolute inset-[20px] rounded-full border border-lime-200/10"
-        />
+              return (
+                <motion.div
+                  key={i}
+                  animate={{
+                    height,
+                    opacity: isAgentSpeaking ? 0.28 + agentLevel * 0.72 : 0.16,
+                  }}
+                  transition={{ duration: 0.06 }}
+                  className="w-1.5 rounded-full bg-lime-200/80 shadow-[0_0_14px_rgba(217,249,157,0.45)]"
+                />
+              );
+            })}
+          </div>
+        </div>
 
         <div className="absolute inset-0 rounded-full ring-1 ring-inset ring-white/10" />
       </motion.div>
@@ -739,54 +753,65 @@ function StartIconMicVisualizer({
   micLevel: number;
   onClick: () => void;
 }) {
-  const bars = [0.55, 0.85, 1, 0.75, 0.58];
+  const bars = [0.45, 0.72, 1, 0.78, 0.52, 0.86, 0.58];
 
   return (
     <button onClick={onClick} disabled={connecting} className="group relative">
       <motion.div
         animate={{
-          scale: isActive ? 1 + micLevel * 0.55 : 1,
-          opacity: isActive ? 0.3 + micLevel * 0.55 : 0.14,
+          scale: isActive ? 1 + micLevel * 0.85 : 1,
+          opacity: isActive ? 0.18 + micLevel * 0.55 : 0.12,
         }}
-        transition={{ duration: 0.045 }}
-        className={`absolute -inset-5 rounded-full blur-xl ${
-          isMuted ? 'bg-red-500/20' : 'bg-lime-300/30'
+        transition={{ duration: 0.04 }}
+        className={`absolute -inset-6 rounded-full blur-2xl ${
+          isMuted ? 'bg-red-500/25' : 'bg-lime-300/45'
         }`}
       />
 
-      <div
-        className={`relative flex h-20 w-20 items-center justify-center rounded-full border bg-[#0A0A0B] shadow-2xl transition-all ${
+      <motion.div
+        animate={{
+          boxShadow: isActive && !isMuted
+            ? `0 0 ${24 + micLevel * 70}px rgba(190,242,100,${0.16 + micLevel * 0.45})`
+            : '0 0 22px rgba(255,255,255,0.04)',
+        }}
+        transition={{ duration: 0.04 }}
+        className={`relative flex h-20 w-20 items-center justify-center rounded-full border bg-[#070807] shadow-2xl transition-all ${
           isActive
             ? isMuted
               ? 'border-red-500/35'
-              : 'border-lime-300/60'
+              : 'border-lime-300/70'
             : 'border-white/10 group-hover:border-lime-300/50'
         }`}
       >
         {connecting ? (
           <Loader2 className="h-7 w-7 animate-spin text-lime-300" />
         ) : isActive ? (
-          <div className="flex h-11 items-center gap-1.5">
-            {bars.map((multiplier, i) => (
-              <motion.div
-                key={i}
-                animate={{
-                  height: Math.max(6, micLevel * 48 * multiplier),
-                  opacity: isMuted ? 0.24 : Math.max(0.38, micLevel + 0.22),
-                }}
-                transition={{ duration: 0.035 }}
-                className={`w-1.5 rounded-full ${
-                  isMuted
-                    ? 'bg-red-500'
-                    : 'bg-lime-300 shadow-[0_0_14px_rgba(190,242,100,0.8)]'
-                }`}
-              />
-            ))}
+          <div className="flex h-12 items-center gap-1.5">
+            {bars.map((multiplier, i) => {
+              const height = Math.max(7, micLevel * 54 * multiplier);
+
+              return (
+                <motion.div
+                  key={i}
+                  animate={{
+                    height,
+                    opacity: isMuted ? 0.22 : Math.max(0.34, micLevel + 0.24),
+                    scaleY: isMuted ? 0.3 : 1,
+                  }}
+                  transition={{ duration: 0.035 }}
+                  className={`w-1.5 rounded-full ${
+                    isMuted
+                      ? 'bg-red-500'
+                      : 'bg-lime-300 shadow-[0_0_16px_rgba(190,242,100,0.9)]'
+                  }`}
+                />
+              );
+            })}
           </div>
         ) : (
           <Power className="h-8 w-8 text-lime-300 transition-colors" />
         )}
-      </div>
+      </motion.div>
     </button>
   );
 }
@@ -961,6 +986,7 @@ function MaximusAgent({
   const [connecting, setConnecting] = useState(false);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
+  const [agentLevel, setAgentLevel] = useState(0);
   const [tasks, setTasks] = useState<ActionTask[]>([]);
   const [historyContext, setHistoryContext] = useState<string>('');
   const [historyMsgs, setHistoryMsgs] = useState<ChatMessage[]>([]);
@@ -985,7 +1011,14 @@ function MaximusAgent({
   const transcriptTimeoutRef = useRef<any>(null);
   const isMutedRef = useRef(false);
   const isActiveRef = useRef(false);
+
   const micAnimationFrameRef = useRef<number | null>(null);
+  const micVisualizerStreamRef = useRef<MediaStream | null>(null);
+  const micAudioContextRef = useRef<AudioContext | null>(null);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const micDataArrayRef = useRef<Uint8Array | null>(null);
+
+  const agentLevelTimeoutRef = useRef<any>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1114,38 +1147,92 @@ function MaximusAgent({
     }, clearDelay);
   };
 
-  const startMicVisualizer = () => {
-    const tick = () => {
-      const recorder: any = audioRecorderRef.current;
-      let nextLevel = 0;
+  const startMicVisualizer = async () => {
+    try {
+      if (!micVisualizerStreamRef.current) {
+        micVisualizerStreamRef.current = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      }
 
-      try {
-        if (recorder && typeof recorder.getFrequencies === 'function') {
-          const freqs = recorder.getFrequencies(20) || [];
-          const avg = freqs.reduce((sum: number, n: number) => sum + Number(n || 0), 0) / Math.max(freqs.length, 1);
-          nextLevel = Math.min(1, Math.max(0, avg * 2.4));
-        } else if (isActiveRef.current && !isMutedRef.current) {
-          nextLevel = 0.04;
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const audioContext = new AudioContextClass();
+      const analyser = audioContext.createAnalyser();
+      const source = audioContext.createMediaStreamSource(micVisualizerStreamRef.current);
+
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.72;
+
+      source.connect(analyser);
+
+      micAudioContextRef.current = audioContext;
+      micAnalyserRef.current = analyser;
+      micDataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
+
+      const tick = () => {
+        if (!isActiveRef.current || isMutedRef.current || !micAnalyserRef.current || !micDataArrayRef.current) {
+          setMicLevel(prev => prev + (0 - prev) * 0.35);
+          micAnimationFrameRef.current = requestAnimationFrame(tick);
+          return;
         }
-      } catch (e) {
-        nextLevel = 0;
+
+        micAnalyserRef.current.getByteFrequencyData(micDataArrayRef.current);
+
+        const values = Array.from(micDataArrayRef.current);
+        const average = values.reduce((sum, value) => sum + value, 0) / Math.max(values.length, 1);
+        const normalized = Math.min(1, Math.max(0, average / 95));
+        const boosted = Math.pow(normalized, 0.72);
+
+        setMicLevel(prev => prev + (boosted - prev) * 0.55);
+        micAnimationFrameRef.current = requestAnimationFrame(tick);
+      };
+
+      if (micAnimationFrameRef.current) {
+        cancelAnimationFrame(micAnimationFrameRef.current);
       }
 
-      if (isMutedRef.current || !isActiveRef.current) {
-        nextLevel = 0;
-      }
-
-      setMicLevel(prev => prev + (nextLevel - prev) * 0.46);
       micAnimationFrameRef.current = requestAnimationFrame(tick);
-    };
+    } catch (error) {
+      console.error('Mic visualizer failed:', error);
 
-    if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current);
-    micAnimationFrameRef.current = requestAnimationFrame(tick);
+      const fallbackTick = () => {
+        const fallbackLevel = isActiveRef.current && !isMutedRef.current ? 0.12 : 0;
+        setMicLevel(prev => prev + (fallbackLevel - prev) * 0.25);
+        micAnimationFrameRef.current = requestAnimationFrame(fallbackTick);
+      };
+
+      if (micAnimationFrameRef.current) {
+        cancelAnimationFrame(micAnimationFrameRef.current);
+      }
+
+      micAnimationFrameRef.current = requestAnimationFrame(fallbackTick);
+    }
   };
 
   const stopMicVisualizer = () => {
-    if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current);
+    if (micAnimationFrameRef.current) {
+      cancelAnimationFrame(micAnimationFrameRef.current);
+    }
+
     micAnimationFrameRef.current = null;
+
+    if (micVisualizerStreamRef.current) {
+      micVisualizerStreamRef.current.getTracks().forEach(track => track.stop());
+      micVisualizerStreamRef.current = null;
+    }
+
+    if (micAudioContextRef.current) {
+      micAudioContextRef.current.close().catch(() => {});
+      micAudioContextRef.current = null;
+    }
+
+    micAnalyserRef.current = null;
+    micDataArrayRef.current = null;
+
     setMicLevel(0);
   };
 
@@ -1201,6 +1288,7 @@ function MaximusAgent({
     setConnecting(true);
     modelTranscriptBufferRef.current = '';
     userTranscriptBufferRef.current = '';
+    setAgentLevel(0);
 
     try {
       if (audioStreamerRef.current) {
@@ -1338,6 +1426,7 @@ function MaximusAgent({
               if (serverContent.interrupted) {
                 audioStreamerRef.current?.stop();
                 setIsAgentSpeaking(false);
+                setAgentLevel(0);
                 modelTranscriptBufferRef.current = '';
                 return;
               }
@@ -1360,8 +1449,22 @@ function MaximusAgent({
                 for (const part of parts) {
                   if (part.inlineData?.data) {
                     audioStreamerRef.current?.addPCM16(part.inlineData.data);
+
                     setIsAgentSpeaking(true);
-                    setTimeout(() => setIsAgentSpeaking(false), 620);
+                    setAgentLevel(prev => Math.min(1, prev + 0.38));
+
+                    if (agentLevelTimeoutRef.current) {
+                      clearTimeout(agentLevelTimeoutRef.current);
+                    }
+
+                    agentLevelTimeoutRef.current = setTimeout(() => {
+                      setIsAgentSpeaking(false);
+                      setAgentLevel(0);
+                    }, 520);
+
+                    setTimeout(() => {
+                      setAgentLevel(prev => Math.max(0, prev * 0.58));
+                    }, 120);
                   }
 
                   if (part.text?.trim()) {
@@ -1432,6 +1535,11 @@ function MaximusAgent({
         }
       } catch (e) {}
 
+      setIsActive(true);
+      isActiveRef.current = true;
+
+      await startMicVisualizer();
+
       audioRecorderRef.current = new AudioRecorder((base64) => {
         if (isMutedRef.current) return;
         sendAudioToLive(base64);
@@ -1439,10 +1547,7 @@ function MaximusAgent({
 
       await audioRecorderRef.current.start();
 
-      setIsActive(true);
-      isActiveRef.current = true;
       setConnecting(false);
-      startMicVisualizer();
 
       setTimeout(() => {
         sendTextToLive(`${settings.userName} is here. Start like you are already present in front of them. Say something like: Yes, I'm here. I'm listening.`);
@@ -1588,6 +1693,13 @@ function MaximusAgent({
     try { sessionRef.current?.close(); } catch (e) {}
 
     stopMicVisualizer();
+
+    if (agentLevelTimeoutRef.current) {
+      clearTimeout(agentLevelTimeoutRef.current);
+      agentLevelTimeoutRef.current = null;
+    }
+
+    setAgentLevel(0);
 
     if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
 
@@ -1747,7 +1859,7 @@ function MaximusAgent({
             <div className="absolute left-0 right-0 top-1/2 h-px bg-gradient-to-r from-transparent via-lime-300/[0.04] to-transparent" />
           </div>
 
-          <LimeVoiceOrb isActive={isActive} isAgentSpeaking={isAgentSpeaking} />
+          <LimeVoiceOrb isActive={isActive} isAgentSpeaking={isAgentSpeaking} agentLevel={agentLevel} />
 
           <AnimatePresence>
             {currentTranscript && (
@@ -1951,28 +2063,16 @@ function MaximusAgent({
             className="fixed inset-0 z-[200] flex flex-col overflow-y-auto bg-[#050505]"
           >
             <div className="sticky top-0 z-10 mx-auto flex w-full max-w-2xl items-center justify-between border-b border-white/10 bg-[#050505]/80 p-6 backdrop-blur-xl">
-              <div>
-                <h2 className="text-sm font-bold uppercase tracking-widest text-white">Settings</h2>
-                <p className="mt-1 text-[10px] uppercase tracking-widest text-zinc-600">Names, voice, and visible personality</p>
-              </div>
+              <h2 className="text-sm font-bold uppercase tracking-widest text-white">
+                Profile
+              </h2>
 
-              <div className="flex gap-2">
-                <button onClick={onLogout} className="flex items-center gap-2 rounded-xl bg-red-500/10 px-4 py-2 text-xs font-bold uppercase tracking-widest text-red-500 transition-all hover:bg-red-500/20 active:scale-95">
-                  <LogOut className="h-4 w-4" /> Logout
-                </button>
-                <button
-                  onClick={persistSettings}
-                  className="flex items-center gap-2 rounded-xl bg-lime-300 px-4 py-2 text-xs font-bold uppercase tracking-widest text-black transition-all hover:bg-lime-200 active:scale-95"
-                >
-                  <Save className="h-4 w-4" /> Save
-                </button>
-                <button onClick={() => setShowProfile(false)} className="rounded-xl bg-white/5 p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
+              <button onClick={() => setShowProfile(false)} className="rounded-xl bg-white/5 p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
             </div>
 
-            <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 p-6 pb-20">
+            <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 p-6 pb-28">
               <div className="flex flex-col items-center gap-4">
                 <div className="group relative flex h-32 w-32 items-center justify-center overflow-hidden rounded-full border-2 border-white/10 bg-zinc-900">
                   {settings.avatarUrl || user.photoURL ? (
@@ -2081,6 +2181,26 @@ function MaximusAgent({
                     The constant system prompt stays hidden and is always applied behind this personality.
                   </p>
                 </div>
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 z-10 mx-auto w-full max-w-2xl border-t border-white/10 bg-[#050505]/90 p-6 backdrop-blur-xl">
+              <div className="flex gap-3">
+                <button
+                  onClick={onLogout}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-4 text-xs font-bold uppercase tracking-widest text-red-400 transition-all hover:bg-red-500/20 active:scale-[0.98]"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Logout
+                </button>
+
+                <button
+                  onClick={persistSettings}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-lime-300 px-4 py-4 text-xs font-bold uppercase tracking-widest text-black transition-all hover:bg-lime-200 active:scale-[0.98]"
+                >
+                  <Save className="h-4 w-4" />
+                  Save
+                </button>
               </div>
             </div>
           </motion.div>
