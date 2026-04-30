@@ -45,6 +45,9 @@ import {
   UserRound,
   Bot,
   FileText,
+  Send,
+  MessageSquare,
+  ExternalLink,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
@@ -58,6 +61,8 @@ interface ChatMessage {
   toolResult?: any;
   downloadData?: string;
   downloadFilename?: string;
+  htmlPreviewData?: string;
+  htmlPreviewFilename?: string;
 }
 
 interface ActionTask {
@@ -68,6 +73,8 @@ interface ActionTask {
   result?: string;
   downloadData?: string;
   downloadFilename?: string;
+  htmlPreviewData?: string;
+  htmlPreviewFilename?: string;
 }
 
 interface AgentSettings {
@@ -158,6 +165,17 @@ Tool truth:
 - If a file arrived but cannot be parsed, say that plainly.
 - Do not invent emails, calendar events, files, documents, videos, maps results, analytics, or account data.
 
+Document and contract generation:
+- When the user asks you to create a contract, agreement, proposal, letter, invoice, report, certificate, legal-style document, business document, or printable PDF-like document, call render_html_document.
+- Generate the document as one complete standalone HTML file.
+- The HTML must include <!DOCTYPE html>, html, head, meta charset, viewport, title, one complete style block, body, and print CSS.
+- The document must look like a proper PDF page in the browser.
+- Use page containers, headers, page breaks, tables, signature blocks, clean typography, and @media print rules when appropriate.
+- Add a visible print button that calls window.print().
+- Do not claim you generated a real PDF binary unless a PDF export tool confirms it.
+- Say normally that the document can be opened and saved as PDF from the browser print dialog.
+- If legal precision matters, say it should be reviewed by a qualified lawyer before signing.
+
 When camera opens:
 - Notice it like a normal person looking up.
 - Say something like: "Oh, yeah, I see it now."
@@ -210,6 +228,27 @@ const DEFAULT_SETTINGS: AgentSettings = {
 };
 
 const GOOGLE_SERVICE_TOOLS = [
+  {
+    name: 'render_html_document',
+    description:
+      'Create a complete standalone printable HTML document, contract, agreement, proposal, report, invoice, certificate, letter, or PDF-style page. The frontend saves it to chat as a downloadable HTML file that can be opened and printed/saved as PDF.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        title: { type: Type.STRING, description: 'The title of the document.' },
+        suggestedFilename: { type: Type.STRING, description: 'Suggested filename, for example saas-development-agreement.html.' },
+        summary: { type: Type.STRING, description: 'Short normal human summary of what was generated.' },
+        html: {
+          type: Type.STRING,
+          description:
+            'Complete standalone HTML document. Must include DOCTYPE, html, head, style, body, and print CSS. It should be printable as PDF through the browser.',
+        },
+        saveToDrive: { type: Type.BOOLEAN, description: 'If true, upload the HTML document to the user drive.' },
+        emailTo: { type: Type.STRING, description: 'Optional email address to send the HTML document to. Use current_user if requested.' },
+      },
+      required: ['title', 'html'],
+    },
+  },
   {
     name: 'gmail_read',
     description:
@@ -519,7 +558,7 @@ const GOOGLE_SERVICE_TOOLS = [
         effectiveDate: { type: Type.STRING, description: 'Effective date.' },
         jurisdiction: { type: Type.STRING, description: 'Governing law or jurisdiction.' },
         terms: { type: Type.STRING, description: 'Important terms, scope, payment, obligations, duration, termination, confidentiality, etc.' },
-        emailTo: { type: Type.STRING, description: 'Optional email address to send PDF to. Use current user email if requested.' },
+        emailTo: { type: Type.STRING, description: 'Optional email address to send PDF to. Use current_user if requested.' },
       },
       required: ['title', 'contractType', 'partyA', 'partyB', 'terms'],
     },
@@ -545,6 +584,29 @@ function makeDownloadFile(result: any, filenameBase: string, mime = 'application
   };
 }
 
+function makeHtmlDocumentFile(html: string, filenameBase: string) {
+  const safe =
+    filenameBase
+      .toLowerCase()
+      .replace(/\.html$/i, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'document';
+
+  const finalHtml = html.trim().toLowerCase().startsWith('<!doctype html')
+    ? html.trim()
+    : `<!DOCTYPE html>\n${html.trim()}`;
+
+  const data = `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}`;
+
+  return {
+    html,
+    htmlPreviewData: data,
+    htmlPreviewFilename: `${safe}.html`,
+    downloadData: data,
+    downloadFilename: `${safe}.html`,
+  };
+}
+
 function makeBlobDownloadData(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -562,7 +624,7 @@ function base64UrlEncode(value: string) {
     .replace(/=+$/g, '');
 }
 
-function arrayBufferToBase64Url(buffer: ArrayBuffer) {
+function arrayBufferToBase64(buffer: ArrayBuffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
 
@@ -570,7 +632,7 @@ function arrayBufferToBase64Url(buffer: ArrayBuffer) {
     binary += String.fromCharCode(bytes[i]);
   }
 
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  return btoa(binary);
 }
 
 function buildEmailRaw({
@@ -1158,6 +1220,8 @@ function MaximusAgent({
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [showSidebar, setShowSidebar] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
   const [settings, setSettings] = useState<AgentSettings>({
     ...DEFAULT_SETTINGS,
     ...initialSettings,
@@ -1363,11 +1427,31 @@ function MaximusAgent({
     });
   };
 
+  const sendChatMessage = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+
+    const clean = chatInput.trim();
+    if (!clean) return;
+
+    saveMessage('user', clean);
+    updateLiveTranscript('user', clean, 3200);
+
+    if (sessionRef.current) {
+      sendTextToLive(clean);
+    } else {
+      const msg = `${settings.agentName} is not connected yet. Start the live session first.`;
+      updateLiveTranscript('model', msg, 3400);
+      saveMessage('model', msg);
+    }
+
+    setChatInput('');
+  };
+
   const googleFetch = async (url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem('googleAccessToken');
 
     if (!token) {
-      throw new Error('No Google access token. Reconnect permissions from Profile.');
+      throw new Error('No access token. Reconnect permissions from Profile.');
     }
 
     const res = await fetch(url, {
@@ -1380,7 +1464,7 @@ function MaximusAgent({
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`Google API error ${res.status}: ${text || res.statusText}`);
+      throw new Error(`Service API error ${res.status}: ${text || res.statusText}`);
     }
 
     return res;
@@ -1446,6 +1530,33 @@ function MaximusAgent({
     return res.blob();
   };
 
+  const uploadTextFileToDrive = async (fileName: string, content: string, mimeType = 'text/plain', folderId?: string) => {
+    const metadata: any = { name: fileName };
+    if (folderId) metadata.parents = [folderId];
+
+    const boundary = `boundary_${Date.now()}`;
+
+    const multipartBody =
+      `--${boundary}\r\n` +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+      JSON.stringify(metadata) +
+      `\r\n--${boundary}\r\n` +
+      `Content-Type: ${mimeType}\r\n\r\n` +
+      `${content || ''}\r\n` +
+      `--${boundary}--`;
+
+    return googleFetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,webViewLink,webContentLink',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body: multipartBody,
+      }
+    ).then(r => r.json());
+  };
+
   const sendGmail = async ({
     to,
     subject,
@@ -1477,6 +1588,59 @@ function MaximusAgent({
     const executedAt = new Date().toISOString();
 
     switch (toolName) {
+      case 'render_html_document': {
+        const title = args?.title || 'Generated Document';
+        const suggestedFilename = args?.suggestedFilename || `${title}.html`;
+        const summary =
+          args?.summary ||
+          'I created the printable document as a standalone HTML file. Open it, then use the print button or browser print to save it as PDF.';
+        const html = args?.html || '';
+
+        if (!html.trim()) {
+          throw new Error('No HTML content was provided.');
+        }
+
+        const htmlFile = makeHtmlDocumentFile(html, suggestedFilename);
+
+        let driveFile: any = null;
+        let emailResult: any = null;
+        const emailTo = args.emailTo === 'current_user' ? getCurrentUserEmail() : args.emailTo;
+
+        if (args.saveToDrive) {
+          driveFile = await uploadTextFileToDrive(
+            htmlFile.htmlPreviewFilename,
+            htmlFile.html,
+            'text/html'
+          );
+        }
+
+        if (emailTo) {
+          emailResult = await sendGmail({
+            to: emailTo,
+            subject: title,
+            body: `${summary}\n\nAttached is the printable HTML document. Open it in a browser and use Print / Save as PDF.`,
+            attachment: {
+              filename: htmlFile.htmlPreviewFilename,
+              mimeType: 'text/html',
+              base64Content: btoa(unescape(encodeURIComponent(htmlFile.html))),
+            },
+          });
+        }
+
+        return {
+          toolName,
+          executedAt,
+          status: 'completed',
+          title,
+          summary,
+          note: summary,
+          driveFile,
+          emailSentTo: emailTo || null,
+          emailResult,
+          ...htmlFile,
+        };
+      }
+
       case 'gmail_read': {
         const queryText = args?.query || '';
         const limit = Math.min(Number(args?.limit || 10), 20);
@@ -1691,34 +1855,12 @@ function MaximusAgent({
       }
 
       case 'drive_upload_file': {
-        const metadata: any = {
-          name: args.fileName,
-        };
-
-        if (args.folderId) metadata.parents = [args.folderId];
-
-        const mimeType = args.mimeType || 'text/plain';
-        const boundary = `boundary_${Date.now()}`;
-
-        const multipartBody =
-          `--${boundary}\r\n` +
-          'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-          JSON.stringify(metadata) +
-          `\r\n--${boundary}\r\n` +
-          `Content-Type: ${mimeType}\r\n\r\n` +
-          `${args.content || ''}\r\n` +
-          `--${boundary}--`;
-
-        const result = await googleFetch(
-          'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,webViewLink,webContentLink',
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': `multipart/related; boundary=${boundary}`,
-            },
-            body: multipartBody,
-          }
-        ).then(r => r.json());
+        const result = await uploadTextFileToDrive(
+          args.fileName,
+          args.content || '',
+          args.mimeType || 'text/plain',
+          args.folderId
+        );
 
         return { toolName, executedAt, status: 'completed', file: result };
       }
@@ -1748,7 +1890,7 @@ function MaximusAgent({
               attachment: {
                 filename: pdfDownload.downloadFilename,
                 mimeType: 'application/pdf',
-                base64Content: arrayBufferToBase64Url(buffer).replace(/-/g, '+').replace(/_/g, '/'),
+                base64Content: arrayBufferToBase64(buffer),
               },
             });
           }
@@ -2036,7 +2178,7 @@ function MaximusAgent({
             attachment: {
               filename: `${title}.pdf`,
               mimeType: 'application/pdf',
-              base64Content: arrayBufferToBase64Url(pdfBuffer).replace(/-/g, '+').replace(/_/g, '/'),
+              base64Content: arrayBufferToBase64(pdfBuffer),
             },
           });
         }
@@ -2083,7 +2225,7 @@ function MaximusAgent({
         `Agent personality overlay: ${settings.personality}.`,
         BIBLE_PERSONALITY || '',
         `Selected visible voice alias: ${selectedVoiceMeta.alias}. Internal voice id: ${selectedVoiceMeta.id}. Voice vibe: ${selectedVoiceMeta.vibe}. Do not mention the internal voice id unless asked by the developer.`,
-        `When asked to create contracts, documents, agreements, letters, PDFs, or files, use the create_contract_document, docs_create, drive_upload_file, gmail_send, or gmail_draft tools when appropriate. Never pretend a file was saved, emailed, or exported unless the tool result confirms it.`,
+        `When asked to create contracts, documents, agreements, letters, PDF-like pages, or files, use render_html_document, create_contract_document, docs_create, drive_upload_file, gmail_send, or gmail_draft when appropriate. Never pretend a file was saved, emailed, exported, or rendered unless the tool result confirms it.`,
         historyContext,
       ].filter(Boolean).join('\n\n');
 
@@ -2133,23 +2275,25 @@ function MaximusAgent({
                   try {
                     const result = await executeGoogleTool(toolName, args);
 
-                    let download = result.downloadData && result.downloadFilename
+                    const download = result.downloadData && result.downloadFilename
                       ? {
                           downloadData: result.downloadData,
                           downloadFilename: result.downloadFilename,
+                          htmlPreviewData: result.htmlPreviewData,
+                          htmlPreviewFilename: result.htmlPreviewFilename,
                         }
                       : makeDownloadFile(result, toolName);
 
                     setTasks(p => p.map(t => t.id === tid ? {
                       ...t,
                       status: 'completed',
-                      result: `Completed: ${toolName}`,
+                      result: result.note || `Completed: ${toolName}`,
                       ...download,
                     } : t));
 
                     saveMessage(
                       'model',
-                      `Tool result from ${toolName}: completed.`,
+                      result.note || `Tool result from ${toolName}: completed.`,
                       {
                         toolName,
                         toolResult: result,
@@ -2683,6 +2827,17 @@ function MaximusAgent({
                       )}
                     </div>
 
+                    {task.htmlPreviewData && task.htmlPreviewFilename && (
+                      <a
+                        href={task.htmlPreviewData}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    )}
+
                     {task.downloadData && task.downloadFilename && (
                       <a
                         href={task.downloadData}
@@ -2697,8 +2852,45 @@ function MaximusAgent({
               </AnimatePresence>
             </div>
 
+            <AnimatePresence>
+              {isChatOpen && (
+                <motion.form
+                  onSubmit={sendChatMessage}
+                  initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 12, scale: 0.98 }}
+                  className="pointer-events-auto mb-4 flex w-[92vw] max-w-2xl items-center gap-2 rounded-full border border-lime-300/15 bg-black/55 p-2 shadow-2xl backdrop-blur-2xl"
+                >
+                  <input
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder={`Type to ${settings.agentName}...`}
+                    className="min-w-0 flex-1 bg-transparent px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-600"
+                    style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}
+                  />
+                  <button
+                    type="submit"
+                    className="flex h-11 w-11 items-center justify-center rounded-full bg-lime-300 text-black transition hover:bg-lime-200 active:scale-95"
+                  >
+                    <Send className="h-4 w-4" />
+                  </button>
+                </motion.form>
+              )}
+            </AnimatePresence>
+
             <div className="pointer-events-auto flex flex-col items-center justify-center gap-4">
-              <div className="flex items-center justify-center gap-8">
+              <div className="flex items-center justify-center gap-5">
+                <button
+                  onClick={() => setIsChatOpen(p => !p)}
+                  className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${
+                    isChatOpen
+                      ? 'border-lime-300/40 bg-lime-300/15 text-lime-200'
+                      : 'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'
+                  }`}
+                >
+                  <MessageSquare className="h-5 w-5" />
+                </button>
+
                 <button
                   onClick={() => setIsMuted(p => !p)}
                   className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${
@@ -2796,6 +2988,29 @@ function MaximusAgent({
                       )}
 
                       {msg.text}
+
+                      {msg.htmlPreviewData && msg.htmlPreviewFilename && (
+                        <div className="mt-3 grid grid-cols-1 gap-2">
+                          <a
+                            href={msg.htmlPreviewData}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            Open Printable Document
+                          </a>
+
+                          <a
+                            href={msg.htmlPreviewData}
+                            download={msg.htmlPreviewFilename}
+                            className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Download HTML
+                          </a>
+                        </div>
+                      )}
 
                       {msg.downloadData && msg.downloadFilename && (
                         <a
