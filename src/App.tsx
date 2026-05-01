@@ -69,8 +69,6 @@ interface ChatMessage {
   downloadFilename?: string;
   htmlPreviewData?: string;
   htmlPreviewFilename?: string;
-  previewUrl?: string;
-  previewText?: string;
 }
 
 interface ActionTask {
@@ -202,9 +200,6 @@ const LIVE_RUNTIME = {
   audioRecorder: null as AudioRecorder | null,
   audioStreamer: null as AudioStreamer | null,
   isClosing: false,
-  visStream: null as MediaStream | null,
-  visCtx: null as AudioContext | null,
-  visAnalyser: null as AnalyserNode | null,
 };
 
 function isClosedSocketError(error: any) {
@@ -291,7 +286,7 @@ const GOOGLE_SERVICE_TOOLS =[
         cc: { type: Type.STRING, description: 'Optional CC recipients.' },
         bcc: { type: Type.STRING, description: 'Optional BCC recipients.' },
       },
-      required: ['to', 'subject', 'body'],
+      required:['to', 'subject', 'body'],
     },
   },
   {
@@ -336,7 +331,7 @@ const GOOGLE_SERVICE_TOOLS =[
         description: { type: Type.STRING, description: 'Optional description.' },
         addMeet: { type: Type.BOOLEAN, description: 'Whether to add a video meeting link.' },
       },
-      required: ['title', 'startTime', 'endTime'],
+      required:['title', 'startTime', 'endTime'],
     },
   },
   {
@@ -447,7 +442,7 @@ const GOOGLE_SERVICE_TOOLS =[
         range: { type: Type.STRING, description: 'Target range.' },
         values: { type: Type.OBJECT, description: 'Rows/cells to write as a 2D array.' },
       },
-      required: ['spreadsheetId', 'range', 'values'],
+      required:['spreadsheetId', 'range', 'values'],
     },
   },
   {
@@ -459,7 +454,7 @@ const GOOGLE_SERVICE_TOOLS =[
         title: { type: Type.STRING, description: 'Presentation title.' },
         outline: { type: Type.STRING, description: 'Slide outline or content.' },
       },
-      required: ['title'],
+      required:['title'],
     },
   },
   {
@@ -577,7 +572,7 @@ const GOOGLE_SERVICE_TOOLS =[
         terms: { type: Type.STRING, description: 'Important terms, scope, payment, obligations, duration, termination, confidentiality, etc.' },
         emailTo: { type: Type.STRING, description: 'Optional email address to send PDF to. Use current_user if requested.' },
       },
-      required: ['title', 'contractType', 'partyA', 'partyB', 'terms'],
+      required:['title', 'contractType', 'partyA', 'partyB', 'terms'],
     },
   },
 ];
@@ -668,6 +663,7 @@ function makeHtmlArtifactFile(html: string, filenameBase: string) {
 function makeBlobDownloadData(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = reject;
     reader.readAsDataURL(blob);
@@ -677,9 +673,11 @@ function makeBlobDownloadData(blob: Blob): Promise<string> {
 function utf8ToBase64(value: string) {
   const bytes = new TextEncoder().encode(value);
   let binary = '';
+
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
+
   return btoa(binary);
 }
 
@@ -707,80 +705,12 @@ function chunkBase64(value: string) {
 function arrayBufferToBase64(buffer: ArrayBuffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
+
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
-  return btoa(binary);
-}
 
-async function generateFileThumbnail(file: File, type: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    if (type.startsWith('image/')) {
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => {
-        const c = document.createElement('canvas');
-        let { width: w, height: h } = img;
-        const max = 512;
-        if (w > max || h > max) {
-          const r = Math.min(max / w, max / h);
-          w = Math.round(w * r);
-          h = Math.round(h * r);
-        }
-        c.width = w; c.height = h;
-        const ctx = c.getContext('2d');
-        ctx?.drawImage(img, 0, 0, w, h);
-        resolve(c.toDataURL('image/jpeg', 0.7));
-        URL.revokeObjectURL(url);
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(null);
-      };
-      img.src = url;
-    } else if (type.startsWith('video/')) {
-      const url = URL.createObjectURL(file);
-      const video = document.createElement('video');
-      video.src = url;
-      video.muted = true;
-      video.playsInline = true;
-      video.currentTime = 1;
-      
-      const handleSeek = () => {
-        const c = document.createElement('canvas');
-        let { videoWidth: w, videoHeight: h } = video;
-        if (w === 0 || h === 0) {
-          resolve(null);
-          URL.revokeObjectURL(url);
-          return;
-        }
-        const max = 512;
-        if (w > max || h > max) {
-          const r = Math.min(max / w, max / h);
-          w = Math.round(w * r);
-          h = Math.round(h * r);
-        }
-        c.width = w; c.height = h;
-        const ctx = c.getContext('2d');
-        ctx?.drawImage(video, 0, 0, w, h);
-        resolve(c.toDataURL('image/jpeg', 0.7));
-        URL.revokeObjectURL(url);
-      };
-      
-      video.onloadeddata = () => {
-         if (video.duration > 0 && video.duration < 1) {
-            video.currentTime = video.duration / 2;
-         }
-      };
-      video.onseeked = handleSeek;
-      video.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(null);
-      };
-    } else {
-      resolve(null);
-    }
-  });
+  return btoa(binary);
 }
 
 function buildEmailRaw({
@@ -1004,7 +934,7 @@ function LimeVoiceOrb({
     bandsRef.current = speakerBands;
     activeRef.current = isActive;
     speakingRef.current = isAgentSpeaking;
-  },[isActive, isAgentSpeaking, speakerBands, speakerLevel]);
+  }, [isActive, isAgentSpeaking, speakerBands, speakerLevel]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1260,13 +1190,13 @@ function StartIconMicVisualizer({
 
 // ---------- App component (auth + main agent) ----------
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const[user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<AgentSettings>(DEFAULT_SETTINGS);
   const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'reset'>('signin');
-  const [authName, setAuthName] = useState('');
+  const[authName, setAuthName] = useState('');
   const [authEmail, setAuthEmail] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
+  const[authPassword, setAuthPassword] = useState('');
   const [authConfirmPassword, setAuthConfirmPassword] = useState('');
   const[authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState<{ type: 'error' | 'success' | 'info'; text: string } | null>(null);
@@ -1662,7 +1592,7 @@ function BeatriceAgent({
   initialSettings: AgentSettings;
 }) {
   const [isActive, setIsActive] = useState(false);
-  const [connecting, setConnecting] = useState(false);
+  const[connecting, setConnecting] = useState(false);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
   const[micBands, setMicBands] = useState<number[]>(Array(20).fill(0));
@@ -1716,7 +1646,7 @@ function BeatriceAgent({
 
   useEffect(() => {
     isMutedRef.current = isMuted;
-  },[isMuted]);
+  }, [isMuted]);
 
   useEffect(() => {
     isActiveRef.current = isActive;
@@ -1840,92 +1770,63 @@ function BeatriceAgent({
     }, clearDelay);
   };
 
-  const startMicVisualizer = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const ctx = new window.AudioContext();
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 64; 
-      source.connect(analyser);
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+  const startMicVisualizer = () => {
+    const tick = () => {
+      const recorder: any = audioRecorderRef.current;
+      const streamer: any = audioStreamerRef.current;
+      let nextLevel = 0;
+      let nextBands = Array(20).fill(0);
+      let nextSpeakerLevel = 0;
+      let nextSpeakerBands = Array(20).fill(0);
 
-      LIVE_RUNTIME.visStream = stream;
-      LIVE_RUNTIME.visCtx = ctx;
-      LIVE_RUNTIME.visAnalyser = analyser;
-
-      const tick = () => {
-        if (!isActiveRef.current) return;
-
-        let nextLevel = 0;
-        let nextBands = Array(20).fill(0);
-
-        if (analyser && !isMutedRef.current) {
-          analyser.getByteFrequencyData(dataArray);
-          const data = Array.from(dataArray).slice(0, 20); 
-          nextBands = data.map(v => v / 255);
-          nextLevel = Math.min(1, (nextBands.reduce((a, b) => a + b, 0) / 20) * 1.5);
+      try {
+        if (recorder && typeof recorder.getFrequencyBands === 'function') {
+          const bands = recorder.getFrequencyBands(20) ||[];
+          nextBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
+          const frequencyAverage = nextBands.reduce((sum: number, n: number) => sum + n, 0) / Math.max(nextBands.length, 1);
+          const recorderLevel = typeof recorder.getLevel === 'function' ? recorder.getLevel() : 0;
+          nextLevel = Math.min(1, Math.max(recorderLevel, frequencyAverage * 1.8));
         } else if (isActiveRef.current && !isMutedRef.current) {
-          nextLevel = 0.04;
-          nextBands = Array(20).fill(0.02);
+          // Dummy heartbeat if specific band parsing isn't exported from AudioRecorder
+          nextLevel = 0.05 + Math.random() * 0.05;
+          nextBands = Array(20).fill(0).map(() => nextLevel + Math.random() * 0.05);
         }
+      } catch (e) {
+        // Ignore
+      }
 
-        let nextSpeakerLevel = 0;
-        let nextSpeakerBands = Array(20).fill(0);
-        try {
-          const streamer: any = audioStreamerRef.current;
-          if (streamer && typeof streamer.getFrequencyBands === 'function') {
-            const bands = streamer.getFrequencyBands(20) ||[];
-            nextSpeakerBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
-            const frequencyAverage = nextSpeakerBands.reduce((sum: number, n: number) => sum + n, 0) / 20;
-            const streamerLevel = typeof streamer.getLevel === 'function' ? streamer.getLevel() : 0;
-            nextSpeakerLevel = Math.min(1, Math.max(streamerLevel, frequencyAverage * 1.65));
-          }
-        } catch (e) {}
-
-        if (isMutedRef.current || !isActiveRef.current) {
-          nextLevel = 0;
-          nextBands = Array(20).fill(0);
+      try {
+        if (streamer && typeof streamer.getFrequencyBands === 'function') {
+          const bands = streamer.getFrequencyBands(20) ||[];
+          nextSpeakerBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
+          const frequencyAverage = nextSpeakerBands.reduce((sum: number, n: number) => sum + n, 0) / Math.max(nextSpeakerBands.length, 1);
+          const streamerLevel = typeof streamer.getLevel === 'function' ? streamer.getLevel() : 0;
+          nextSpeakerLevel = Math.min(1, Math.max(streamerLevel, frequencyAverage * 1.65));
         }
+      } catch (e) {
+        // Ignore
+      }
 
-        if (!isActiveRef.current) {
-          nextSpeakerLevel = 0;
-          nextSpeakerBands = Array(20).fill(0);
-        }
+      if (isMutedRef.current || !isActiveRef.current) {
+        nextLevel = 0;
+        nextBands = Array(20).fill(0);
+      }
 
-        setMicLevel(prev => prev + (nextLevel - prev) * 0.46);
-        setMicBands(prev => nextBands.map((band, i) => prev[i] + (band - prev[i]) * 0.42));
-        setSpeakerLevel(prev => prev + (nextSpeakerLevel - prev) * 0.5);
-        setSpeakerBands(prev => nextSpeakerBands.map((band, i) => prev[i] + (band - prev[i]) * 0.48));
+      if (!isActiveRef.current) {
+        nextSpeakerLevel = 0;
+        nextSpeakerBands = Array(20).fill(0);
+      }
 
-        micAnimationFrameRef.current = requestAnimationFrame(tick);
-      };
+      setMicLevel(prev => prev + (nextLevel - prev) * 0.46);
+      setMicBands(prev => nextBands.map((band: number, i: number) => prev[i] + (band - prev[i]) * 0.42));
+      setSpeakerLevel(prev => prev + (nextSpeakerLevel - prev) * 0.5);
+      setSpeakerBands(prev => nextSpeakerBands.map((band: number, i: number) => prev[i] + (band - prev[i]) * 0.48));
 
-      tick();
-    } catch (err) {
-      console.error('Visualizer Mic access failed', err);
-      const tickFallback = () => {
-        let nextSpeakerLevel = 0;
-        let nextSpeakerBands = Array(20).fill(0);
-        try {
-          const streamer: any = audioStreamerRef.current;
-          if (streamer && typeof streamer.getFrequencyBands === 'function') {
-            const bands = streamer.getFrequencyBands(20) ||[];
-            nextSpeakerBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
-            const frequencyAverage = nextSpeakerBands.reduce((sum: number, n: number) => sum + n, 0) / 20;
-            const streamerLevel = typeof streamer.getLevel === 'function' ? streamer.getLevel() : 0;
-            nextSpeakerLevel = Math.min(1, Math.max(streamerLevel, frequencyAverage * 1.65));
-          }
-        } catch (e) {}
+      micAnimationFrameRef.current = requestAnimationFrame(tick);
+    };
 
-        setMicLevel(0);
-        setMicBands(Array(20).fill(0));
-        setSpeakerLevel(prev => prev + (nextSpeakerLevel - prev) * 0.5);
-        setSpeakerBands(prev => nextSpeakerBands.map((band, i) => prev[i] + (band - prev[i]) * 0.48));
-        micAnimationFrameRef.current = requestAnimationFrame(tickFallback);
-      };
-      tickFallback();
-    }
+    if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current);
+    micAnimationFrameRef.current = requestAnimationFrame(tick);
   };
 
   const stopMicVisualizer = () => {
@@ -1936,16 +1837,6 @@ function BeatriceAgent({
     setMicBands(Array(20).fill(0));
     setSpeakerLevel(0);
     setSpeakerBands(Array(20).fill(0));
-
-    if (LIVE_RUNTIME.visStream) {
-      LIVE_RUNTIME.visStream.getTracks().forEach(t => t.stop());
-      LIVE_RUNTIME.visStream = null;
-    }
-    if (LIVE_RUNTIME.visCtx) {
-      LIVE_RUNTIME.visCtx.close().catch(()=>{});
-      LIVE_RUNTIME.visCtx = null;
-      LIVE_RUNTIME.visAnalyser = null;
-    }
   };
 
   const sendTextToLive = (text: string) => {
@@ -3315,33 +3206,10 @@ function BeatriceAgent({
   const handleAttachFile = async (file: File) => {
     const safeName = file.name || 'attached file';
     const fileType = file.type || 'unknown';
-    const ext = safeName.split('.').pop()?.toLowerCase() || '';
-
-    const isImage = fileType.startsWith('image/');
-    const isAudio = fileType.startsWith('audio/');
-    const isVideo = fileType.startsWith('video/');
-    const isTextLike = fileType.startsWith('text/') ||['css','js','jsx','ts','tsx','json','md','csv','html','xml'].includes(ext);
-
-    let previewUrl = await generateFileThumbnail(file, fileType);
-    let previewText = '';
-    let fullText = '';
-
-    if (!isImage && !isVideo && !isAudio && (isTextLike || file.size < 500000)) {
-      try {
-        fullText = await file.text();
-        if (!/\x00/.test(fullText)) {
-          previewText = fullText.slice(0, 800) + (fullText.length > 800 ? '\n...[truncated]' : '');
-        } else {
-           fullText = ''; 
-        }
-      } catch (e) {}
-    }
 
     saveMessage('user', `[Attached file: ${safeName}]`, {
       fileName: safeName,
       fileType,
-      previewUrl: previewUrl || undefined,
-      previewText: previewText || undefined,
     });
 
     updateLiveTranscript('user', `Attached file: ${safeName}`, 3000);
@@ -3354,38 +3222,100 @@ function BeatriceAgent({
     }
 
     try {
-      if (isImage || isVideo) {
-         if (previewUrl) {
-            const base64Data = previewUrl.split(',')[1];
-            sendVideoToLive(base64Data);
-            sendTextToLive(`${settings.userName} uploaded a ${isImage ? 'image' : 'video'} named ${safeName}. Please look at the frame and respond.`);
-         }
-      } else if (isAudio) {
-          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-          const ctx = new AudioCtx({ sampleRate: 16000 });
-          const arrayBuffer = await file.arrayBuffer();
-          const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-          const channelData = audioBuffer.getChannelData(0); 
-          
-          const pcm16 = new Int16Array(channelData.length);
-          for (let i = 0; i < channelData.length; i++) {
-            let s = Math.max(-1, Math.min(1, channelData[i]));
-            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const c = document.createElement('canvas');
+            let w = img.width;
+            let h = img.height;
+            const maxDim = 1024;
+            if (w > maxDim || h > maxDim) {
+              const ratio = Math.min(maxDim / w, maxDim / h);
+              w = Math.round(w * ratio);
+              h = Math.round(h * ratio);
+            }
+            c.width = w;
+            c.height = h;
+            const ctx = c.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, w, h);
+              const base64Url = c.toDataURL('image/jpeg', 0.8);
+              const base64Data = base64Url.split(',')[1];
+              if (base64Data) {
+                sendVideoToLive(base64Data);
+                sendTextToLive(`${settings.userName} uploaded an image named ${safeName}. Please look at it and respond.`);
+              }
+            }
+          };
+          img.src = e.target?.result as string;
+        };
+        reader.readAsDataURL(file);
+      } else if (file.type.startsWith('audio/')) {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtx) throw new Error('AudioContext not supported');
+        const ctx = new AudioCtx({ sampleRate: 16000 });
+        const arrayBuffer = await file.arrayBuffer();
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+        const channelData = audioBuffer.getChannelData(0); // Float32Array
+        
+        const pcm16 = new Int16Array(channelData.length);
+        for (let i = 0; i < channelData.length; i++) {
+          let s = Math.max(-1, Math.min(1, channelData[i]));
+          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        
+        const bytes = new Uint8Array(pcm16.buffer);
+        let binary = '';
+        const chunkSize = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]);
+        }
+        const base64Data = btoa(binary);
+        sendAudioToLive(base64Data);
+        sendTextToLive(`${settings.userName} uploaded an audio file named ${safeName}. Please listen to it and respond.`);
+      } else if (file.type.startsWith('video/')) {
+        const video = document.createElement('video');
+        video.src = URL.createObjectURL(file);
+        video.muted = true;
+        video.playsInline = true;
+        video.onloadedmetadata = () => {
+          video.currentTime = Math.max(0, video.duration / 2); // Middle frame
+        };
+        video.onseeked = () => {
+          const c = document.createElement('canvas');
+          let w = video.videoWidth;
+          let h = video.videoHeight;
+          const maxDim = 1024;
+          if (w > maxDim || h > maxDim) {
+            const ratio = Math.min(maxDim / w, maxDim / h);
+            w = Math.round(w * ratio);
+            h = Math.round(h * ratio);
           }
-          
-          const bytes = new Uint8Array(pcm16.buffer);
-          let binary = '';
-          const chunkSize = 0x8000;
-          for (let i = 0; i < bytes.length; i += chunkSize) {
-            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]);
+          c.width = w;
+          c.height = h;
+          const ctx = c.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, c.width, c.height);
+            const base64Url = c.toDataURL('image/jpeg', 0.8);
+            const base64Data = base64Url.split(',')[1];
+            if (base64Data) {
+              sendVideoToLive(base64Data);
+              sendTextToLive(`${settings.userName} uploaded a video file named ${safeName}. Here is a key frame from it. Look at it and respond.`);
+            }
           }
-          const base64Data = btoa(binary);
-          sendAudioToLive(base64Data);
-          sendTextToLive(`${settings.userName} uploaded an audio file named ${safeName}. Please listen to it and respond.`);
-      } else if (fullText) {
-           sendTextToLive(`${settings.userName} uploaded a document/code file named ${safeName}. Content:\n\n${fullText}\n\nPlease read it and respond.`);
+          URL.revokeObjectURL(video.src);
+        };
       } else {
-           sendTextToLive(`${settings.userName} uploaded a file named "${safeName}" with type "${fileType}". You cannot read its binary contents directly, so acknowledge it normally.`);
+        if (file.size < 150000) { // < 150KB
+          const text = await file.text();
+          if (!/\x00/.test(text)) { // Basic binary check
+            sendTextToLive(`${settings.userName} uploaded a text document named ${safeName}. Content:\n\n${text}`);
+            return;
+          }
+        }
+        sendTextToLive(`${settings.userName} uploaded a file named "${safeName}" with type "${fileType}". You cannot read its binary contents directly, so acknowledge it normally.`);
       }
     } catch (e) {
       console.error("File processing error", e);
@@ -3781,18 +3711,6 @@ function BeatriceAgent({
                           </div>
                         )}
 
-                        {/* RENDER THE UPLOADED FILE PREVIEWS INSIDE THE MESSAGE BUBBLE */}
-                        {msg.previewUrl && (
-                          <div className="mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/50 shadow-md">
-                            <img src={msg.previewUrl} alt="Thumbnail preview" className="max-h-48 w-full object-contain" />
-                          </div>
-                        )}
-                        {msg.previewText && (
-                          <div className="mb-2 max-h-32 overflow-y-auto rounded border border-white/5 bg-black/40 p-2 font-mono text-[9px] text-zinc-300 shadow-inner">
-                            <pre className="whitespace-pre-wrap break-words">{msg.previewText}</pre>
-                          </div>
-                        )}
-
                         {msg.toolName && (
                           <div className="mb-2 flex items-center gap-2 rounded-xl bg-lime-300/10 px-2 py-1 text-[10px] text-lime-200">
                             <FileText className="h-3 w-3" />
@@ -3839,32 +3757,35 @@ function BeatriceAgent({
                     </div>
                   ))}
 
-                  <AnimatePresence>
-                    {currentTranscript && (
-                      <motion.div
-                        key={`live-${currentTranscript.role}`}
-                        initial={{ opacity: 0, x: -20, scale: 0.95 }}
-                        animate={{ opacity: 1, x: 0, scale: 1 }}
-                        exit={{ opacity: 0, x: 20, scale: 0.95, transition: { duration: 0.15 } }}
-                        className={`flex flex-col ${currentTranscript.role === 'user' ? 'items-end' : 'items-start'}`}
-                      >
-                        <span className="mb-1 flex items-center gap-1.5 text-[8px] uppercase tracking-widest text-zinc-500">
-                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-                          LIVE {currentTranscript.role === 'user' ? settings.userName : settings.agentName}
-                        </span>
+                  {/* Real-time transcript for user inside chatbox */}
+                  {liveUserText && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-end">
+                      <span className="mb-1 text-[8px] uppercase tracking-widest text-zinc-600">
+                        {settings.userName} (Live)
+                      </span>
+                      <div className="max-w-[92%] rounded-2xl p-3 text-xs leading-relaxed rounded-tr-sm border border-sky-400/30 bg-sky-400/20 text-sky-100 shadow-[0_0_15px_rgba(56,189,248,0.15)]">
+                        {liveUserText}
+                        <span className="ml-1 inline-block h-2 w-2 animate-pulse rounded-full bg-sky-400"></span>
+                      </div>
+                    </motion.div>
+                  )}
 
-                        <div className={`max-w-[92%] rounded-2xl border border-dashed p-3 text-xs leading-relaxed ${
-                          currentTranscript.role === 'user'
-                            ? 'rounded-tr-sm border-sky-400/20 bg-sky-400/5 text-sky-100'
-                            : 'rounded-tl-sm border-lime-300/10 bg-white/5 text-zinc-300'
-                        }`}>
-                          {currentTranscript.text}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                  {/* Real-time transcript for model inside chatbox */}
+                  {liveModelText && (
+                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-start mt-2">
+                      <span className="mb-1 text-[8px] uppercase tracking-widest text-zinc-600">
+                        {settings.agentName} (Live)
+                      </span>
+                      <div className="max-w-[92%] rounded-2xl p-3 text-xs leading-relaxed rounded-tl-sm border border-lime-300/30 bg-lime-300/20 text-lime-50 shadow-[0_0_15px_rgba(190,242,100,0.15)]">
+                        {liveModelText}
+                        <span className="ml-1 inline-block h-2 w-2 animate-pulse rounded-full bg-lime-300"></span>
+                      </div>
+                    </motion.div>
+                  )}
 
-                  {historyMsgs.length === 0 && !currentTranscript && (
+                  <div ref={chatEndRef} className="h-4" />
+
+                  {historyMsgs.length === 0 && !liveUserText && !liveModelText && (
                     <div className="py-10 text-center text-[10px] font-bold uppercase tracking-widest text-zinc-600">
                       No Office History Yet
                     </div>
