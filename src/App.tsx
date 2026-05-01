@@ -53,10 +53,10 @@ import {
   Send,
   ExternalLink,
   Code2,
+  Globe,
+  Link,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-
-// ==================== Types & Constants ====================
 
 interface ChatMessage {
   role: 'user' | 'model';
@@ -70,6 +70,8 @@ interface ChatMessage {
   downloadFilename?: string;
   htmlPreviewData?: string;
   htmlPreviewFilename?: string;
+  localPreviewData?: string;
+  localPreviewType?: string;
 }
 
 interface ActionTask {
@@ -192,7 +194,33 @@ const DEFAULT_SETTINGS: AgentSettings = {
   selectedVoice: 'Kore',
 };
 
+const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+
+// --- Full tool definitions ---
 const GOOGLE_SERVICE_TOOLS = [
+  {
+    name: 'google_search',
+    description: 'Search the web using Google Search. Returns top results with title, snippet, and URL.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        query: { type: Type.STRING, description: 'Search query.' },
+        limit: { type: Type.NUMBER, description: 'Number of results (max 5). Default 3.' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'url_fetch',
+    description: 'Fetch and read the content of a web page. Returns the text content.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        url: { type: Type.STRING, description: 'Full URL to fetch.' },
+      },
+      required: ['url'],
+    },
+  },
   {
     name: 'render_web_artifact',
     description:
@@ -562,11 +590,16 @@ const GOOGLE_SERVICE_TOOLS = [
   },
 ];
 
-// ==================== Helper Functions ====================
+// ====================================================================
+// Utility functions
+// ====================================================================
 
 function safeJsonStringify(value: any) {
-  try { return JSON.stringify(value, null, 2); }
-  catch { return String(value); }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function makeDownloadFile(result: any, filenameBase: string, mime = 'application/json') {
@@ -582,15 +615,49 @@ function makeDownloadFile(result: any, filenameBase: string, mime = 'application
 function normalizeHtml(html: string) {
   const trimmed = String(html || '').trim();
   if (!trimmed) {
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Generated Artifact</title><style>body{font-family:Arial,sans-serif;background:#111;color:#fff;display:grid;place-items:center;min-height:100vh;margin:0}.card{max-width:720px;padding:32px;border:1px solid rgba(255,255,255,.15);border-radius:24px;background:rgba(255,255,255,.06)}</style></head><body><div class="card"><h1>Empty Artifact</h1><p>No HTML was provided.</p></div></body></html>`;
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generated Artifact</title>
+<style>
+body{font-family:Arial,sans-serif;background:#111;color:#fff;display:grid;place-items:center;min-height:100vh;margin:0}
+.card{max-width:720px;padding:32px;border:1px solid rgba(255,255,255,.15);border-radius:24px;background:rgba(255,255,255,.06)}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Empty Artifact</h1>
+<p>No HTML was provided.</p>
+</div>
+</body>
+</html>`;
   }
   if (trimmed.toLowerCase().startsWith('<!doctype html')) return trimmed;
-  if (trimmed.toLowerCase().startsWith('<html')) return `<!DOCTYPE html>\n${trimmed}`;
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Generated Artifact</title></head><body>${trimmed}</body></html>`;
+  if (trimmed.toLowerCase().startsWith('<html')) {
+    return `<!DOCTYPE html>\n${trimmed}`;
+  }
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generated Artifact</title>
+</head>
+<body>
+${trimmed}
+</body>
+</html>`;
 }
 
 function makeHtmlArtifactFile(html: string, filenameBase: string) {
-  const safe = String(filenameBase || 'artifact').toLowerCase().replace(/\.html$/i, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'artifact';
+  const safe =
+    String(filenameBase || 'artifact')
+      .toLowerCase()
+      .replace(/\.html$/i, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'artifact';
   const finalHtml = normalizeHtml(html);
   const data = `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}`;
   return {
@@ -613,17 +680,39 @@ function makeBlobDownloadData(blob: Blob): Promise<string> {
 
 function base64UrlEncode(value: string) {
   return btoa(unescape(encodeURIComponent(value)))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
   return btoa(binary);
 }
 
-function buildEmailRaw({ to, subject, body, cc, bcc, attachment }: { to: string; subject: string; body: string; cc?: string; bcc?: string; attachment?: { filename: string; mimeType: string; base64Content: string } }) {
+function buildEmailRaw({
+  to,
+  subject,
+  body,
+  cc,
+  bcc,
+  attachment,
+}: {
+  to: string;
+  subject: string;
+  body: string;
+  cc?: string;
+  bcc?: string;
+  attachment?: {
+    filename: string;
+    mimeType: string;
+    base64Content: string;
+  };
+}) {
   const headers = [
     `To: ${to}`,
     cc ? `Cc: ${cc}` : '',
@@ -631,10 +720,17 @@ function buildEmailRaw({ to, subject, body, cc, bcc, attachment }: { to: string;
     `Subject: ${subject}`,
     'MIME-Version: 1.0',
   ].filter(Boolean);
+
   if (!attachment) {
-    const raw = [...headers, 'Content-Type: text/plain; charset="UTF-8"', '', body].join('\r\n');
+    const raw = [
+      ...headers,
+      'Content-Type: text/plain; charset="UTF-8"',
+      '',
+      body,
+    ].join('\r\n');
     return base64UrlEncode(raw);
   }
+
   const boundary = `boundary_${Date.now()}`;
   const raw = [
     ...headers,
@@ -654,19 +750,35 @@ function buildEmailRaw({ to, subject, body, cc, bcc, attachment }: { to: string;
     '',
     `--${boundary}--`,
   ].join('\r\n');
+
   return base64UrlEncode(raw);
 }
 
 function readableDateRange(date?: string, timeMin?: string, timeMax?: string) {
   const now = new Date();
-  if (timeMin && timeMax) return { timeMin, timeMax };
+  if (timeMin && timeMax) {
+    return { timeMin, timeMax };
+  }
   const target = date ? new Date(date) : now;
-  const start = new Date(target); start.setHours(0,0,0,0);
-  const end = new Date(target); end.setHours(23,59,59,999);
-  return { timeMin: start.toISOString(), timeMax: end.toISOString() };
+  const start = new Date(target);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(target);
+  end.setHours(23, 59, 59, 999);
+  return {
+    timeMin: start.toISOString(),
+    timeMax: end.toISOString(),
+  };
 }
 
-function buildContractText({ title, contractType, partyA, partyB, effectiveDate, jurisdiction, terms }: any) {
+function buildContractText({
+  title,
+  contractType,
+  partyA,
+  partyB,
+  effectiveDate,
+  jurisdiction,
+  terms,
+}: any) {
   const today = new Date().toLocaleDateString();
   return `${title || 'Contract Agreement'}
 
@@ -727,81 +839,335 @@ Note:
 This draft is generated for convenience and should be reviewed by a qualified legal professional before signing.`;
 }
 
-// ==================== UI Components (unchanged) ====================
+// ====================================================================
+// UI Components
+// ====================================================================
 
-function OneLineStreamingTranscript({ text, role, name }: { text: string; role: 'user' | 'model'; name: string }) {
+function OneLineStreamingTranscript({
+  text,
+  role,
+  name,
+}: {
+  text: string;
+  role: 'user' | 'model';
+  name: string;
+}) {
   return (
-    <motion.div key={`${role}-${text}`} initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-6 }} transition={{ duration:0.12 }} className="w-full overflow-hidden px-4" style={{ fontFamily:'Roboto, system-ui, sans-serif' }}>
+    <motion.div
+      key={`${role}-${text}`}
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      transition={{ duration: 0.12 }}
+      className="w-full overflow-hidden px-4"
+      style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}
+    >
       <div className="mx-auto flex max-w-6xl items-center justify-center gap-3 overflow-hidden whitespace-nowrap rounded-full border border-lime-300/15 bg-black/35 px-5 py-3 shadow-2xl backdrop-blur-2xl">
-        <span className={`shrink-0 rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-[0.22em] ${role==='user'?'border border-sky-400/20 bg-sky-500/10 text-sky-300':'border border-lime-300/25 bg-lime-400/10 text-lime-300'}`}>{role==='user'?'You':name}</span>
+        <span
+          className={`shrink-0 rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-[0.22em] ${
+            role === 'user'
+              ? 'border border-sky-400/20 bg-sky-500/10 text-sky-300'
+              : 'border border-lime-300/25 bg-lime-400/10 text-lime-300'
+          }`}
+        >
+          {role === 'user' ? 'You' : name}
+        </span>
         <div className="min-w-0 flex-1 overflow-hidden">
-          <p className={`truncate text-left text-lg font-medium leading-none tracking-tight md:text-2xl ${role==='user'?'text-sky-100':'text-lime-50'}`}>{text}</p>
+          <p className={`truncate text-left text-lg font-medium leading-none tracking-tight md:text-2xl ${
+            role === 'user' ? 'text-sky-100' : 'text-lime-50'
+          }`}>
+            {text}
+          </p>
         </div>
       </div>
     </motion.div>
   );
 }
 
-function LimeVoiceOrb({ isActive, isAgentSpeaking, speakerLevel, speakerBands }: { isActive:boolean; isAgentSpeaking:boolean; speakerLevel:number; speakerBands:number[] }) {
-  const canvasRef = useRef<HTMLCanvasElement|null>(null);
+function LimeVoiceOrb({
+  isActive,
+  isAgentSpeaking,
+  speakerLevel,
+  speakerBands,
+}: {
+  isActive: boolean;
+  isAgentSpeaking: boolean;
+  speakerLevel: number;
+  speakerBands: number[];
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const levelRef = useRef(0);
   const bandsRef = useRef<number[]>(Array(20).fill(0));
   const activeRef = useRef(false);
   const speakingRef = useRef(false);
-  useEffect(() => { levelRef.current = speakerLevel; bandsRef.current = speakerBands; activeRef.current = isActive; speakingRef.current = isAgentSpeaking; }, [isActive, isAgentSpeaking, speakerBands, speakerLevel]);
+
   useEffect(() => {
-    const canvas = canvasRef.current; const ctx = canvas?.getContext('2d'); if(!canvas||!ctx) return;
-    let frame=0, raf=0, displayLevel=0;
-    const fitCanvas = () => { const dpr = Math.min(window.devicePixelRatio||1,2); const width = Math.max(1,Math.floor(canvas.clientWidth*dpr)); const height = Math.max(1,Math.floor(canvas.clientHeight*dpr)); if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;} ctx.setTransform(dpr,0,0,dpr,0,0); return {width:width/dpr, height:height/dpr}; };
-    const makeOrbPath = (cx:number,cy:number,radius:number,pulse:number,time:number) => { const path=new Path2D(); const points:Array<{x:number;y:number}>=[]; const bands = bandsRef.current.length ? bandsRef.current : Array(20).fill(0); const live = activeRef.current && speakingRef.current; const count=112; for(let i=0;i<count;i++){ const angle = (Math.PI*2*i)/count; const band = bands[i%bands.length]||0; const surface = Math.sin(angle*2.1+time*0.95)*(live?2.5:0.9)+Math.sin(angle*3.7-time*0.68)*(live?1.7:0.55)+band*(live?8.5:1.8); const r = radius + pulse*8 + surface; points.push({x:cx+Math.cos(angle)*r, y:cy+Math.sin(angle)*r}); } points.forEach((point,index)=>{ const next=points[(index+1)%points.length]; const midX=(point.x+next.x)/2, midY=(point.y+next.y)/2; if(index===0) path.moveTo(midX,midY); else path.quadraticCurveTo(point.x,point.y,midX,midY); }); path.closePath(); return path; };
-    const drawGlow = (cx:number,cy:number,radius:number,inner:string,outer:string) => { const gradient=ctx.createRadialGradient(cx,cy,0,cx,cy,radius); gradient.addColorStop(0,inner); gradient.addColorStop(1,outer); ctx.fillStyle=gradient; ctx.beginPath(); ctx.arc(cx,cy,radius,0,Math.PI*2); ctx.fill(); };
-    const draw = () => { const {width,height}=fitCanvas(); const cx=width/2,cy=height/2, time=frame/60; const rawLevel = activeRef.current ? Math.max(levelRef.current, speakingRef.current?0.035:0) : 0; displayLevel+= (rawLevel-displayLevel)*0.16; const bands = bandsRef.current.length ? bandsRef.current : Array(20).fill(0); const bandEnergy = bands.reduce((s,b)=>s+b,0)/Math.max(bands.length,1); const pulse = Math.min(1, Math.max(displayLevel, bandEnergy*1.25)); const live = activeRef.current&&speakingRef.current; const baseRadius=93;
-      ctx.clearRect(0,0,width,height); ctx.save(); ctx.globalAlpha=activeRef.current?0.42+pulse*0.28:0.24; ctx.filter='blur(34px)'; drawGlow(cx,cy,118+pulse*22,'rgba(190,242,100,0.42)','rgba(22,101,52,0)'); ctx.restore();
-      ctx.save(); ctx.globalAlpha=activeRef.current?0.24+pulse*0.26:0.12; ctx.strokeStyle='rgba(190,242,100,0.34)'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(cx,cy,116+pulse*16,0,Math.PI*2); ctx.stroke(); ctx.restore();
-      const orbPath=makeOrbPath(cx,cy,baseRadius,pulse,time); ctx.save(); ctx.shadowColor='rgba(190,242,100,0.38)'; ctx.shadowBlur=38+pulse*28; const bodyGradient = ctx.createRadialGradient(cx-38,cy-48,8,cx,cy,126); bodyGradient.addColorStop(0,'rgba(236,252,203,0.76)'); bodyGradient.addColorStop(0.27,'rgba(163,230,53,0.58)'); bodyGradient.addColorStop(0.58,'rgba(34,197,94,0.46)'); bodyGradient.addColorStop(1,'rgba(5,46,22,0.96)'); ctx.fillStyle=bodyGradient; ctx.fill(orbPath); ctx.restore();
-      ctx.save(); ctx.clip(orbPath); ctx.globalCompositeOperation='screen'; drawGlow(cx-38+Math.sin(time*0.7)*12,cy-34+Math.cos(time*0.55)*10,78+pulse*12,'rgba(236,252,203,0.52)','rgba(236,252,203,0)'); drawGlow(cx+40+Math.cos(time*0.62)*14,cy+24+Math.sin(time*0.75)*12,90+pulse*18,'rgba(16,185,129,0.44)','rgba(16,185,129,0)'); drawGlow(cx-6+Math.sin(time*0.5)*18,cy+34+Math.cos(time*0.46)*10,98,'rgba(132,204,22,0.22)','rgba(132,204,22,0)'); ctx.restore();
-      ctx.save(); ctx.strokeStyle=`rgba(217,249,157,${0.16+pulse*0.26})`; ctx.lineWidth=1.4; ctx.stroke(orbPath); ctx.restore();
-      ctx.save(); ctx.globalAlpha=live?0.14+pulse*0.18:0.06; ctx.fillStyle='rgba(255,255,255,0.58)'; ctx.beginPath(); ctx.ellipse(cx-36,cy-46,24+pulse*6,11+pulse*3,-0.55,0,Math.PI*2); ctx.fill(); ctx.restore();
-      frame+=1; raf=requestAnimationFrame(draw); };
-    raf=requestAnimationFrame(draw); return ()=>cancelAnimationFrame(raf);
+    levelRef.current = speakerLevel;
+    bandsRef.current = speakerBands;
+    activeRef.current = isActive;
+    speakingRef.current = isAgentSpeaking;
+  }, [isActive, isAgentSpeaking, speakerBands, speakerLevel]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+
+    let frame = 0;
+    let raf = 0;
+    let displayLevel = 0;
+
+    const fitCanvas = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+      const height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return {
+        width: width / dpr,
+        height: height / dpr,
+      };
+    };
+
+    const makeOrbPath = (cx: number, cy: number, radius: number, pulse: number, time: number) => {
+      const path = new Path2D();
+      const points: Array<{ x: number; y: number }> = [];
+      const bands = bandsRef.current.length ? bandsRef.current : Array(20).fill(0);
+      const live = activeRef.current && speakingRef.current;
+      const count = 112;
+
+      for (let i = 0; i < count; i++) {
+        const angle = (Math.PI * 2 * i) / count;
+        const band = bands[i % bands.length] || 0;
+        const surface =
+          Math.sin(angle * 2.1 + time * 0.95) * (live ? 2.5 : 0.9) +
+          Math.sin(angle * 3.7 - time * 0.68) * (live ? 1.7 : 0.55) +
+          band * (live ? 8.5 : 1.8);
+        const r = radius + pulse * 8 + surface;
+        points.push({
+          x: cx + Math.cos(angle) * r,
+          y: cy + Math.sin(angle) * r,
+        });
+      }
+
+      points.forEach((point, index) => {
+        const next = points[(index + 1) % points.length];
+        const midX = (point.x + next.x) / 2;
+        const midY = (point.y + next.y) / 2;
+        if (index === 0) {
+          path.moveTo(midX, midY);
+        } else {
+          path.quadraticCurveTo(point.x, point.y, midX, midY);
+        }
+      });
+      path.closePath();
+      return path;
+    };
+
+    const drawGlow = (cx: number, cy: number, radius: number, inner: string, outer: string) => {
+      const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+      gradient.addColorStop(0, inner);
+      gradient.addColorStop(1, outer);
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    const draw = () => {
+      const { width, height } = fitCanvas();
+      const cx = width / 2;
+      const cy = height / 2;
+      const time = frame / 60;
+      const rawLevel = activeRef.current ? Math.max(levelRef.current, speakingRef.current ? 0.035 : 0) : 0;
+      displayLevel += (rawLevel - displayLevel) * 0.16;
+      const bands = bandsRef.current.length ? bandsRef.current : Array(20).fill(0);
+      const bandEnergy = bands.reduce((sum, band) => sum + band, 0) / Math.max(bands.length, 1);
+      const pulse = Math.min(1, Math.max(displayLevel, bandEnergy * 1.25));
+      const live = activeRef.current && speakingRef.current;
+      const baseRadius = 93;
+
+      ctx.clearRect(0, 0, width, height);
+
+      ctx.save();
+      ctx.globalAlpha = activeRef.current ? 0.42 + pulse * 0.28 : 0.24;
+      ctx.filter = 'blur(34px)';
+      drawGlow(cx, cy, 118 + pulse * 22, 'rgba(190,242,100,0.42)', 'rgba(22,101,52,0)');
+      ctx.restore();
+
+      ctx.save();
+      ctx.globalAlpha = activeRef.current ? 0.24 + pulse * 0.26 : 0.12;
+      ctx.strokeStyle = 'rgba(190,242,100,0.34)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 116 + pulse * 16, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      const orbPath = makeOrbPath(cx, cy, baseRadius, pulse, time);
+
+      ctx.save();
+      ctx.shadowColor = 'rgba(190,242,100,0.38)';
+      ctx.shadowBlur = 38 + pulse * 28;
+      const bodyGradient = ctx.createRadialGradient(cx - 38, cy - 48, 8, cx, cy, 126);
+      bodyGradient.addColorStop(0, 'rgba(236,252,203,0.76)');
+      bodyGradient.addColorStop(0.27, 'rgba(163,230,53,0.58)');
+      bodyGradient.addColorStop(0.58, 'rgba(34,197,94,0.46)');
+      bodyGradient.addColorStop(1, 'rgba(5,46,22,0.96)');
+      ctx.fillStyle = bodyGradient;
+      ctx.fill(orbPath);
+      ctx.restore();
+
+      ctx.save();
+      ctx.clip(orbPath);
+      ctx.globalCompositeOperation = 'screen';
+      drawGlow(
+        cx - 38 + Math.sin(time * 0.7) * 12,
+        cy - 34 + Math.cos(time * 0.55) * 10,
+        78 + pulse * 12,
+        'rgba(236,252,203,0.52)',
+        'rgba(236,252,203,0)'
+      );
+      drawGlow(
+        cx + 40 + Math.cos(time * 0.62) * 14,
+        cy + 24 + Math.sin(time * 0.75) * 12,
+        90 + pulse * 18,
+        'rgba(16,185,129,0.44)',
+        'rgba(16,185,129,0)'
+      );
+      drawGlow(
+        cx - 6 + Math.sin(time * 0.5) * 18,
+        cy + 34 + Math.cos(time * 0.46) * 10,
+        98,
+        'rgba(132,204,22,0.22)',
+        'rgba(132,204,22,0)'
+      );
+      ctx.restore();
+
+      ctx.save();
+      ctx.strokeStyle = `rgba(217,249,157,${0.16 + pulse * 0.26})`;
+      ctx.lineWidth = 1.4;
+      ctx.stroke(orbPath);
+      ctx.restore();
+
+      ctx.save();
+      ctx.globalAlpha = live ? 0.14 + pulse * 0.18 : 0.06;
+      ctx.fillStyle = 'rgba(255,255,255,0.58)';
+      ctx.beginPath();
+      ctx.ellipse(cx - 36, cy - 46, 24 + pulse * 6, 11 + pulse * 3, -0.55, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      frame += 1;
+      raf = requestAnimationFrame(draw);
+    };
+
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
   }, []);
-  return <div className="relative flex h-72 w-72 items-center justify-center"><canvas ref={canvasRef} className="h-full w-full" aria-hidden="true" /></div>;
+
+  return (
+    <div className="relative flex h-72 w-72 items-center justify-center">
+      <canvas ref={canvasRef} className="h-full w-full" aria-hidden="true" />
+    </div>
+  );
 }
 
-function StartIconMicVisualizer({ isActive, connecting, isMuted, micLevel, micBands, onClick }: { isActive:boolean; connecting:boolean; isMuted:boolean; micLevel:number; micBands?:number[]; onClick:()=>void }) {
-  const innerBands = micBands?.length ? micBands.slice(5,14) : [0.35,0.5,0.72,0.9,1,0.82,0.64,0.46,0.32].map(n=>n*micLevel);
+function StartIconMicVisualizer({
+  isActive,
+  connecting,
+  isMuted,
+  micLevel,
+  micBands,
+  onClick,
+}: {
+  isActive: boolean;
+  connecting: boolean;
+  isMuted: boolean;
+  micLevel: number;
+  micBands?: number[];
+  onClick: () => void;
+}) {
+  const innerBands = micBands?.length
+    ? micBands.slice(5, 14)
+    : [0.35, 0.5, 0.72, 0.9, 1, 0.82, 0.64, 0.46, 0.32].map(n => n * micLevel);
+
   return (
-    <button onClick={onClick} disabled={connecting} aria-label={isActive?'Stop voice session':'Start voice session'} className="group relative flex h-20 w-20 items-center justify-center">
-      <motion.div animate={{ opacity: isActive ? 0.16+micLevel*0.3 : 0.08 }} transition={{ duration:0.045 }} className={`absolute inset-0 rounded-full ${isMuted?'bg-red-500/20':'bg-lime-300/30'}`} />
-      <div className={`relative flex h-20 w-20 items-center justify-center rounded-full border bg-[#0A0A0B] shadow-2xl transition-all ${isActive? isMuted?'border-red-500/35':'border-lime-300/60' : 'border-white/10 group-hover:border-lime-300/50'}`}>
-        {connecting ? <Loader2 className="h-7 w-7 animate-spin text-lime-300" /> : isActive ? (
+    <button
+      onClick={onClick}
+      disabled={connecting}
+      aria-label={isActive ? 'Stop voice session' : 'Start voice session'}
+      className="group relative flex h-20 w-20 items-center justify-center"
+    >
+      <motion.div
+        animate={{
+          opacity: isActive ? 0.16 + micLevel * 0.3 : 0.08,
+        }}
+        transition={{ duration: 0.045 }}
+        className={`absolute inset-0 rounded-full ${
+          isMuted ? 'bg-red-500/20' : 'bg-lime-300/30'
+        }`}
+      />
+      <div
+        className={`relative flex h-20 w-20 items-center justify-center rounded-full border bg-[#0A0A0B] shadow-2xl transition-all ${
+          isActive
+            ? isMuted
+              ? 'border-red-500/35'
+              : 'border-lime-300/60'
+            : 'border-white/10 group-hover:border-lime-300/50'
+        }`}
+      >
+        {connecting ? (
+          <Loader2 className="h-7 w-7 animate-spin text-lime-300" />
+        ) : isActive ? (
           <div className="absolute inset-0 flex items-center justify-center overflow-hidden rounded-full">
             <div className="flex h-12 items-center gap-1">
-              {innerBands.map((band,i)=>{
-                const liveBand = isMuted?0:Math.max(band, micLevel*0.4);
-                return <motion.div key={i} animate={{ height:Math.max(5,liveBand*42), opacity:isMuted?0.2:Math.max(0.32,liveBand+0.18) }} transition={{ duration:0.035 }} className={`w-1 rounded-full ${isMuted?'bg-red-500':'bg-lime-300 shadow-[0_0_10px_rgba(190,242,100,0.75)]'}`} />;
+              {innerBands.map((band, i) => {
+                const liveBand = isMuted ? 0 : Math.max(band, micLevel * 0.4);
+                return (
+                  <motion.div
+                    key={i}
+                    animate={{
+                      height: Math.max(5, liveBand * 42),
+                      opacity: isMuted ? 0.2 : Math.max(0.32, liveBand + 0.18),
+                    }}
+                    transition={{ duration: 0.035 }}
+                    className={`w-1 rounded-full ${
+                      isMuted
+                        ? 'bg-red-500'
+                        : 'bg-lime-300 shadow-[0_0_10px_rgba(190,242,100,0.75)]'
+                    }`}
+                  />
+                );
               })}
             </div>
           </div>
-        ) : <Power className="h-8 w-8 text-lime-300 transition-colors" />}
+        ) : (
+          <Power className="h-8 w-8 text-lime-300 transition-colors" />
+        )}
       </div>
     </button>
   );
 }
 
-// ==================== Main App (auth) ====================
+// ====================================================================
+// App (authentication)
+// ====================================================================
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<AgentSettings>(DEFAULT_SETTINGS);
-  const [authMode, setAuthMode] = useState<'signin'|'signup'|'reset'>('signin');
+  const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'reset'>('signin');
   const [authName, setAuthName] = useState('');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authConfirmPassword, setAuthConfirmPassword] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
-  const [authMessage, setAuthMessage] = useState<{type:'error'|'success'|'info';text:string}|null>(null);
+  const [authMessage, setAuthMessage] = useState<{ type: 'error' | 'success' | 'info'; text: string } | null>(null);
   const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [showAuthConfirmPassword, setShowAuthConfirmPassword] = useState(false);
 
@@ -826,8 +1192,12 @@ export default function App() {
           const providerIds = u.providerData.map(provider => provider.providerId);
           const authProvider = providerIds.includes('google.com') ? 'google' : 'email';
           const hasGoogleServices = authProvider === 'google' && Boolean(localStorage.getItem('googleAccessToken'));
+
           if (!userSnap.exists()) {
-            const initialSettings = { ...DEFAULT_SETTINGS, userName: u.displayName || DEFAULT_SETTINGS.userName };
+            const initialSettings = {
+              ...DEFAULT_SETTINGS,
+              userName: u.displayName || DEFAULT_SETTINGS.userName,
+            };
             await set(userRef, {
               displayName: initialSettings.userName,
               email: u.email || '',
@@ -840,7 +1210,12 @@ export default function App() {
             setSettings(initialSettings);
           } else {
             const data = userSnap.val();
-            if (data.settings) setSettings({ ...DEFAULT_SETTINGS, ...data.settings });
+            if (data.settings) {
+              setSettings({
+                ...DEFAULT_SETTINGS,
+                ...data.settings,
+              });
+            }
             await update(userRef, {
               email: u.email || data.email || '',
               authProvider,
@@ -848,7 +1223,9 @@ export default function App() {
               updatedAt: serverTimestamp(),
             });
           }
-        } catch (error) { handleDatabaseError(error, OperationType.CREATE, 'users'); }
+        } catch (error) {
+          handleDatabaseError(error, OperationType.CREATE, 'users');
+        }
       }
       setLoading(false);
     });
@@ -867,10 +1244,14 @@ export default function App() {
   };
 
   const handleGoogleLogin = async () => {
-    setAuthBusy(true); setAuthMessage(null);
+    setAuthBusy(true);
+    setAuthMessage(null);
     try {
       const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'consent select_account', access_type: 'offline' });
+      provider.setCustomParameters({
+        prompt: 'consent select_account',
+        access_type: 'offline',
+      });
       provider.addScope('https://www.googleapis.com/auth/gmail.modify');
       provider.addScope('https://www.googleapis.com/auth/gmail.send');
       provider.addScope('https://www.googleapis.com/auth/gmail.compose');
@@ -885,9 +1266,12 @@ export default function App() {
       provider.addScope('https://www.googleapis.com/auth/forms.body');
       provider.addScope('https://www.googleapis.com/auth/chat.messages');
       provider.addScope('https://www.googleapis.com/auth/analytics.readonly');
+
       const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
       const credential = GoogleAuthProvider.credentialFromResult(result);
-      if (credential?.accessToken) localStorage.setItem('googleAccessToken', credential.accessToken);
+      if (credential?.accessToken) {
+        localStorage.setItem('googleAccessToken', credential.accessToken);
+      }
     } catch (error: any) {
       console.error(error);
       if (error && error.message && error.message.includes('missing initial state')) {
@@ -895,15 +1279,20 @@ export default function App() {
       } else {
         setAuthMessage({ type: 'error', text: getAuthErrorMessage(error) });
       }
-    } finally { setAuthBusy(false); }
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const handleEmailAuth = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setAuthBusy(true); setAuthMessage(null);
+    setAuthBusy(true);
+    setAuthMessage(null);
+
     const email = authEmail.trim();
     const password = authPassword.trim();
     const fullName = authName.trim();
+
     try {
       if (!email) throw new Error('Enter your email address.');
       if (authMode === 'reset') {
@@ -927,7 +1316,9 @@ export default function App() {
     } catch (error: any) {
       console.error(error);
       setAuthMessage({ type: 'error', text: getAuthErrorMessage(error) });
-    } finally { setAuthBusy(false); }
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const handleLogout = () => {
@@ -937,7 +1328,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#020203] text-zinc-500" style={{ fontFamily:'Roboto, system-ui, sans-serif' }}>
+      <div className="flex min-h-screen items-center justify-center bg-[#020203] text-zinc-500" style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}>
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="h-8 w-8 animate-spin" />
           <p className="animate-pulse text-[10px] uppercase tracking-widest">Preparing VEP...</p>
@@ -950,12 +1341,29 @@ export default function App() {
     const isSignUp = authMode === 'signup';
     const isReset = authMode === 'reset';
     const authTitle = isSignUp ? 'Register' : isReset ? 'Reset password' : 'Welcome';
-    const authSubtitle = isSignUp ? 'Create your new account' : isReset ? 'Send a reset link to your email' : 'Login to your account';
+    const authSubtitle = isSignUp
+      ? 'Create your new account'
+      : isReset
+        ? 'Send a reset link to your email'
+        : 'Login to your account';
+
     return (
-      <div className="relative min-h-[100dvh] overflow-hidden bg-[#050505] text-white" style={{ fontFamily:'Roboto, system-ui, sans-serif' }}>
+      <div
+        className="relative min-h-[100dvh] overflow-hidden bg-[#050505] text-white"
+        style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}
+      >
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(190,242,100,0.13),transparent_34%),linear-gradient(180deg,#050505,#020302)]" />
-        <div className="pointer-events-none absolute inset-0 opacity-[0.04]" style={{ backgroundImage:'linear-gradient(rgba(255,255,255,.14) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.14) 1px, transparent 1px)', backgroundSize:'32px 32px' }} />
-        <motion.main key={authMode} initial={{ opacity:0, y:12 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.2, ease:'easeOut' }} className="relative z-10 mx-auto flex min-h-[100dvh] w-full max-w-[430px] flex-col px-6 pb-[max(22px,env(safe-area-inset-bottom))] pt-[max(28px,env(safe-area-inset-top))]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.04]"
+          style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,.14) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.14) 1px, transparent 1px)', backgroundSize: '32px 32px' }}
+        />
+        <motion.main
+          key={authMode}
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
+          className="relative z-10 mx-auto flex min-h-[100dvh] w-full max-w-[430px] flex-col px-6 pb-[max(22px,env(safe-area-inset-bottom))] pt-[max(28px,env(safe-area-inset-top))]"
+        >
           <section className="flex flex-1 flex-col justify-center py-10">
             <div className="mb-9 flex flex-col items-center text-center">
               <img src={EBURON_LOGO_URL} alt="Eburon" className="mb-8 h-24 w-24 rounded-full object-cover shadow-[0_0_70px_rgba(190,242,100,0.16)]" />
@@ -966,46 +1374,111 @@ export default function App() {
               {isSignUp && (
                 <label className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 focus-within:border-lime-300/40">
                   <UserRound className="h-4 w-4 shrink-0 text-zinc-500" />
-                  <input value={authName} onChange={(e)=>setAuthName(e.target.value)} placeholder="Full name" autoComplete="name" className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600" />
+                  <input
+                    value={authName}
+                    onChange={(e) => setAuthName(e.target.value)}
+                    placeholder="Full name"
+                    autoComplete="name"
+                    className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600"
+                  />
                 </label>
               )}
               <label className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 focus-within:border-lime-300/40">
                 <Mail className="h-4 w-4 shrink-0 text-zinc-500" />
-                <input value={authEmail} onChange={(e)=>setAuthEmail(e.target.value)} type="email" placeholder="Email" autoComplete="email" className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600" />
+                <input
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  type="email"
+                  placeholder="Email"
+                  autoComplete="email"
+                  className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600"
+                />
               </label>
               {!isReset && (
                 <label className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 focus-within:border-lime-300/40">
                   <LockKeyhole className="h-4 w-4 shrink-0 text-zinc-500" />
-                  <input value={authPassword} onChange={(e)=>setAuthPassword(e.target.value)} type={showAuthPassword?'text':'password'} placeholder="Password" autoComplete={isSignUp?'new-password':'current-password'} className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600" />
-                  <button type="button" onClick={()=>setShowAuthPassword(v=>!v)} aria-label={showAuthPassword?'Hide password':'Show password'} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200">
+                  <input
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    type={showAuthPassword ? 'text' : 'password'}
+                    placeholder="Password"
+                    autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                    className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthPassword(value => !value)}
+                    aria-label={showAuthPassword ? 'Hide password' : 'Show password'}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
+                  >
                     {showAuthPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                   {!isSignUp && (
-                    <button type="button" onClick={()=>{setAuthMode('reset');setAuthMessage(null);}} className="text-xs font-bold text-lime-200">Forgot?</button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode('reset');
+                        setAuthMessage(null);
+                      }}
+                      className="text-xs font-bold text-lime-200"
+                    >
+                      Forgot?
+                    </button>
                   )}
                 </label>
               )}
               {isSignUp && (
                 <label className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 focus-within:border-lime-300/40">
                   <LockKeyhole className="h-4 w-4 shrink-0 text-zinc-500" />
-                  <input value={authConfirmPassword} onChange={(e)=>setAuthConfirmPassword(e.target.value)} type={showAuthConfirmPassword?'text':'password'} placeholder="Confirm password" autoComplete="new-password" className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600" />
-                  <button type="button" onClick={()=>setShowAuthConfirmPassword(v=>!v)} aria-label={showAuthConfirmPassword?'Hide confirm password':'Show confirm password'} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200">
+                  <input
+                    value={authConfirmPassword}
+                    onChange={(e) => setAuthConfirmPassword(e.target.value)}
+                    type={showAuthConfirmPassword ? 'text' : 'password'}
+                    placeholder="Confirm password"
+                    autoComplete="new-password"
+                    className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthConfirmPassword(value => !value)}
+                    aria-label={showAuthConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
+                  >
                     {showAuthConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </label>
               )}
               {authMessage && (
-                <div className={`rounded-2xl px-4 py-3 text-xs leading-5 ${authMessage.type==='error'?'border border-red-400/20 bg-red-500/10 text-red-200':authMessage.type==='success'?'border border-lime-300/20 bg-lime-300/10 text-lime-100':'border border-white/10 bg-white/[0.06] text-zinc-300'}`}>
+                <div className={`rounded-2xl px-4 py-3 text-xs leading-5 ${
+                  authMessage.type === 'error'
+                    ? 'border border-red-400/20 bg-red-500/10 text-red-200'
+                    : authMessage.type === 'success'
+                      ? 'border border-lime-300/20 bg-lime-300/10 text-lime-100'
+                      : 'border border-white/10 bg-white/[0.06] text-zinc-300'
+                }`}>
                   {authMessage.text}
                 </div>
               )}
-              <button type="submit" disabled={authBusy} className="mt-7 flex h-14 w-full items-center justify-center rounded-full bg-lime-300 text-sm font-bold text-black shadow-[0_18px_48px_rgba(190,242,100,0.18)] transition active:scale-[0.985] disabled:opacity-60">
+              <button
+                type="submit"
+                disabled={authBusy}
+                className="mt-7 flex h-14 w-full items-center justify-center rounded-full bg-lime-300 text-sm font-bold text-black shadow-[0_18px_48px_rgba(190,242,100,0.18)] transition active:scale-[0.985] disabled:opacity-60"
+              >
                 {authBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : isReset ? 'Send reset link' : isSignUp ? 'Sign up' : 'Sign in'}
               </button>
               {!isReset && (
                 <>
-                  <div className="flex items-center gap-3 py-1.5"><div className="h-px flex-1 bg-white/10" /><span className="text-xs font-medium text-zinc-600">or</span><div className="h-px flex-1 bg-white/10" /></div>
-                  <button type="button" onClick={handleGoogleLogin} disabled={authBusy} className="flex h-14 w-full items-center justify-center gap-3 rounded-full border border-white/10 bg-white/[0.06] px-5 text-sm font-bold text-zinc-100 transition hover:border-lime-300/30 hover:bg-lime-300/10 active:scale-[0.985] disabled:opacity-60">
+                  <div className="flex items-center gap-3 py-1.5">
+                    <div className="h-px flex-1 bg-white/10" />
+                    <span className="text-xs font-medium text-zinc-600">or</span>
+                    <div className="h-px flex-1 bg-white/10" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGoogleLogin}
+                    disabled={authBusy}
+                    className="flex h-14 w-full items-center justify-center gap-3 rounded-full border border-white/10 bg-white/[0.06] px-5 text-sm font-bold text-zinc-100 transition hover:border-lime-300/30 hover:bg-lime-300/10 active:scale-[0.985] disabled:opacity-60"
+                  >
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-base font-black text-black">G</span>
                     Continue with Google
                   </button>
@@ -1015,8 +1488,15 @@ export default function App() {
           </section>
           <footer className="text-center text-sm text-zinc-500">
             {isSignUp ? 'Back to ' : isReset ? 'Remembered it? ' : 'Create account? '}
-            <button type="button" onClick={()=>{ setAuthMode(isSignUp||isReset?'signin':'signup'); setAuthMessage(null); }} className="font-bold text-lime-200">
-              {isSignUp||isReset ? 'Sign in' : 'Sign up'}
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode(isSignUp || isReset ? 'signin' : 'signup');
+                setAuthMessage(null);
+              }}
+              className="font-bold text-lime-200"
+            >
+              {isSignUp || isReset ? 'Sign in' : 'Sign up'}
             </button>
           </footer>
         </motion.main>
@@ -1027,9 +1507,20 @@ export default function App() {
   return <BeatriceAgent user={user} onLogout={handleLogout} initialSettings={settings} />;
 }
 
-// ==================== BeatriceAgent Component ====================
+// ====================================================================
+// BeatriceAgent Component
+// ====================================================================
 
-function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogout: () => void; initialSettings: AgentSettings }) {
+function BeatriceAgent({
+  user,
+  onLogout,
+  initialSettings,
+}: {
+  user: User;
+  onLogout: () => void;
+  initialSettings: AgentSettings;
+}) {
+  // States
   const [isActive, setIsActive] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
@@ -1041,49 +1532,79 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
   const [historyContext, setHistoryContext] = useState<string>('');
   const [historyMsgs, setHistoryMsgs] = useState<ChatMessage[]>([]);
   const [currentTranscript, setCurrentTranscript] = useState<{ role: 'user' | 'model'; text: string } | null>(null);
+
   const [isMuted, setIsMuted] = useState(false);
+  const [manualMuted, setManualMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [showSidebar, setShowSidebar] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [settings, setSettings] = useState<AgentSettings>({ ...DEFAULT_SETTINGS, ...initialSettings });
-  const [googleServicesConnected, setGoogleServicesConnected] = useState(Boolean(localStorage.getItem('googleAccessToken')));
 
+  // File preview
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFilePreviewData, setPendingFilePreviewData] = useState<string>('');
+  const [pendingFilePreviewType, setPendingFilePreviewType] = useState<string>('');
+
+  // Refs
   const aiRef = useRef<GoogleGenAI | null>(null);
   const sessionRef = useRef<any>(null);
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
   const recognitionRef = useRef<any>(null);
+
   const transcriptTimeoutRef = useRef<any>(null);
   const isMutedRef = useRef(false);
   const isActiveRef = useRef(false);
   const micAnimationFrameRef = useRef<number | null>(null);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoIntervalRef = useRef<any>(null);
-  const videoFramePending = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const modelTranscriptBufferRef = useRef('');
   const userTranscriptBufferRef = useRef('');
   const lastSavedModelTranscriptRef = useRef('');
   const lastSavedUserTranscriptRef = useRef('');
 
+  // Sync refs
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
+
+  // Auto‑mute when agent speaks (unless user manually muted)
+  useEffect(() => {
+    if (isAgentSpeaking && !manualMuted) {
+      setIsMuted(true);
+    } else if (!isAgentSpeaking && !manualMuted) {
+      setIsMuted(false);
+    }
+  }, [isAgentSpeaking, manualMuted]);
 
   // Wake lock
   useEffect(() => {
     let wakeLock: any = null;
-    if (isActive && 'wakeLock' in navigator) {
-      (navigator as any).wakeLock.request('screen').then((wl: any) => { wakeLock = wl; }).catch(()=>{});
-    }
-    return () => { if (wakeLock) wakeLock.release().catch(()=>{}); };
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await (navigator as any).wakeLock.request('screen');
+        }
+      } catch (err) {}
+    };
+    if (isActive) requestWakeLock();
+    return () => {
+      if (wakeLock) wakeLock.release().catch(() => {});
+    };
   }, [isActive]);
 
   // History
   useEffect(() => {
-    const historyRef = query(ref(rtdb, 'users/' + user.uid + '/messages'), orderByChild('timestamp'), limitToLast(160));
+    const historyRef = query(
+      ref(rtdb, 'users/' + user.uid + '/messages'),
+      orderByChild('timestamp'),
+      limitToLast(160)
+    );
     const unsub = onValue(historyRef, (snap) => {
       const msgs: string[] = [];
       const rawMsgs: ChatMessage[] = [];
@@ -1093,13 +1614,19 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
         rawMsgs.push(m);
       });
       setHistoryMsgs(rawMsgs);
-      if (msgs.length > 0) setHistoryContext('Previous conversation for context memory:\n' + msgs.slice(-36).join('\n'));
-      else setHistoryContext('');
+      if (msgs.length > 0) {
+        setHistoryContext('Previous conversation for context memory:\n' + msgs.slice(-36).join('\n'));
+      } else {
+        setHistoryContext('');
+      }
     });
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (apiKey) aiRef.current = new GoogleGenAI({ apiKey });
     audioStreamerRef.current = new AudioStreamer();
-    return () => { unsub(); stopSession(); };
+    return () => {
+      unsub();
+      stopSession();
+    };
   }, [user.uid]);
 
   const selectedVoiceMeta = useMemo(
@@ -1107,19 +1634,27 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
     [settings.selectedVoice]
   );
 
-  // ---- Message helpers ----
+  // Helpers
   const saveMessage = (role: 'user' | 'model', text: string, extra?: Partial<ChatMessage>) => {
     const clean = text.trim();
     if (!clean) return;
     try {
       const msgRef = push(ref(rtdb, 'users/' + user.uid + '/messages'));
-      set(msgRef, { role, text: clean, timestamp: Date.now(), ...extra });
-    } catch (e) { console.error(e); }
+      set(msgRef, {
+        role,
+        text: clean,
+        timestamp: Date.now(),
+        ...extra,
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const saveModelBuffer = () => {
     const clean = modelTranscriptBufferRef.current.trim();
-    if (!clean || clean === lastSavedModelTranscriptRef.current) return;
+    if (!clean) return;
+    if (clean === lastSavedModelTranscriptRef.current) return;
     lastSavedModelTranscriptRef.current = clean;
     saveMessage('model', clean);
     modelTranscriptBufferRef.current = '';
@@ -1127,7 +1662,8 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
 
   const saveUserBuffer = () => {
     const clean = userTranscriptBufferRef.current.trim();
-    if (!clean || clean === lastSavedUserTranscriptRef.current) return;
+    if (!clean) return;
+    if (clean === lastSavedUserTranscriptRef.current) return;
     lastSavedUserTranscriptRef.current = clean;
     saveMessage('user', clean);
     userTranscriptBufferRef.current = '';
@@ -1138,203 +1674,152 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
     if (!clean) return;
     setCurrentTranscript({ role, text: clean });
     if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
-    transcriptTimeoutRef.current = setTimeout(() => setCurrentTranscript(null), clearDelay);
+    transcriptTimeoutRef.current = setTimeout(() => {
+      setCurrentTranscript(null);
+    }, clearDelay);
   };
 
-  // ---- Visualizer ----
+  // Visualizers
   const startMicVisualizer = () => {
     const tick = () => {
       const recorder: any = audioRecorderRef.current;
       const streamer: any = audioStreamerRef.current;
-      let nextLevel = 0, nextBands = Array(20).fill(0), nextSpeakerLevel = 0, nextSpeakerBands = Array(20).fill(0);
+      let nextLevel = 0;
+      let nextBands = Array(20).fill(0);
+      let nextSpeakerLevel = 0;
+      let nextSpeakerBands = Array(20).fill(0);
       try {
         if (recorder && typeof recorder.getFrequencyBands === 'function') {
           const bands = recorder.getFrequencyBands(20) || [];
           nextBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
-          const frequencyAverage = nextBands.reduce((s: number, n: number) => s + n, 0) / Math.max(nextBands.length, 1);
-          nextLevel = Math.min(1, Math.max(recorder.getLevel?.()||0, frequencyAverage * 1.8));
+          const frequencyAverage = nextBands.reduce((sum: number, n: number) => sum + n, 0) / Math.max(nextBands.length, 1);
+          const recorderLevel = typeof recorder.getLevel === 'function' ? recorder.getLevel() : 0;
+          nextLevel = Math.min(1, Math.max(recorderLevel, frequencyAverage * 1.8));
         } else if (isActiveRef.current && !isMutedRef.current) {
-          nextLevel = 0.06; nextBands = Array(20).fill(0.04);
+          nextLevel = 0.06;
+          nextBands = Array(20).fill(0.04);
         }
-      } catch (e) { nextLevel = 0; nextBands = Array(20).fill(0); }
+      } catch (e) {
+        nextLevel = 0;
+        nextBands = Array(20).fill(0);
+      }
       try {
         if (streamer && typeof streamer.getFrequencyBands === 'function') {
           const bands = streamer.getFrequencyBands(20) || [];
           nextSpeakerBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
-          const frequencyAverage = nextSpeakerBands.reduce((s: number, n: number) => s + n, 0) / Math.max(nextSpeakerBands.length, 1);
-          nextSpeakerLevel = Math.min(1, Math.max(streamer.getLevel?.()||0, frequencyAverage * 1.65));
+          const frequencyAverage = nextSpeakerBands.reduce((sum: number, n: number) => sum + n, 0) / Math.max(nextSpeakerBands.length, 1);
+          const streamerLevel = typeof streamer.getLevel === 'function' ? streamer.getLevel() : 0;
+          nextSpeakerLevel = Math.min(1, Math.max(streamerLevel, frequencyAverage * 1.65));
         }
-      } catch (e) { nextSpeakerLevel = 0; nextSpeakerBands = Array(20).fill(0); }
-      if (isMutedRef.current || !isActiveRef.current) { nextLevel = 0; nextBands = Array(20).fill(0); }
-      if (!isActiveRef.current) { nextSpeakerLevel = 0; nextSpeakerBands = Array(20).fill(0); }
-      setMicLevel(p => p + (nextLevel - p) * 0.46);
-      setMicBands(p => nextBands.map((b,i) => { const c = p[i]||0; return c + (b - c)*0.42; }));
-      setSpeakerLevel(p => p + (nextSpeakerLevel - p) * 0.5);
-      setSpeakerBands(p => nextSpeakerBands.map((b,i) => { const c = p[i]||0; return c + (b - c)*0.48; }));
+      } catch (e) {
+        nextSpeakerLevel = 0;
+        nextSpeakerBands = Array(20).fill(0);
+      }
+      if (isMutedRef.current || !isActiveRef.current) {
+        nextLevel = 0;
+        nextBands = Array(20).fill(0);
+      }
+      if (!isActiveRef.current) {
+        nextSpeakerLevel = 0;
+        nextSpeakerBands = Array(20).fill(0);
+      }
+      setMicLevel(prev => prev + (nextLevel - prev) * 0.46);
+      setMicBands(prev => nextBands.map((band: number, i: number) => {
+        const current = prev[i] || 0;
+        return current + (band - current) * 0.42;
+      }));
+      setSpeakerLevel(prev => prev + (nextSpeakerLevel - prev) * 0.5);
+      setSpeakerBands(prev => nextSpeakerBands.map((band: number, i: number) => {
+        const current = prev[i] || 0;
+        return current + (band - current) * 0.48;
+      }));
       micAnimationFrameRef.current = requestAnimationFrame(tick);
     };
     if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current);
     micAnimationFrameRef.current = requestAnimationFrame(tick);
   };
-  const stopMicVisualizer = () => { if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current); micAnimationFrameRef.current = null; setMicLevel(0); setMicBands(Array(20).fill(0)); setSpeakerLevel(0); setSpeakerBands(Array(20).fill(0)); };
 
-  // ---- Send helpers ----
-  const sendTextToLive = (text: string) => { if (sessionRef.current && typeof sessionRef.current.sendRealtimeInput === 'function') sessionRef.current.sendRealtimeInput({ text }); };
-  const sendAudioToLive = (base64: string) => { if (sessionRef.current && typeof sessionRef.current.sendRealtimeInput === 'function') sessionRef.current.sendRealtimeInput({ audio: { data: base64, mimeType: 'audio/pcm;rate=16000' } }); };
-  const sendVideoToLive = (base64Data: string) => { if (sessionRef.current && typeof sessionRef.current.sendRealtimeInput === 'function') sessionRef.current.sendRealtimeInput({ video: { data: base64Data, mimeType: 'image/jpeg' } }); };
+  const stopMicVisualizer = () => {
+    if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current);
+    micAnimationFrameRef.current = null;
+    setMicLevel(0);
+    setMicBands(Array(20).fill(0));
+    setSpeakerLevel(0);
+    setSpeakerBands(Array(20).fill(0));
+  };
 
-  // ---- File conversion helpers ----
-  function fileToBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => { const result = reader.result as string; resolve(result.split(',')[1] || result); };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
+  // Core I/O
+  const sendTextToLive = (text: string) => {
+    if (!sessionRef.current || typeof sessionRef.current.sendRealtimeInput !== 'function') return;
+    sessionRef.current.sendRealtimeInput({ text });
+  };
+
+  const sendAudioToLive = (base64: string) => {
+    if (!sessionRef.current || typeof sessionRef.current.sendRealtimeInput !== 'function') return;
+    sessionRef.current.sendRealtimeInput({
+      audio: { data: base64, mimeType: 'audio/pcm;rate=16000' },
     });
-  }
+  };
 
-  function captureVideoPoster(file: File): Promise<string> {
-    return new Promise((resolve) => {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.src = URL.createObjectURL(file);
-      video.addEventListener('loadeddata', () => { video.currentTime = 1; });
-      video.addEventListener('seeked', () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-        canvas.getContext('2d')!.drawImage(video, 0, 0);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-        URL.revokeObjectURL(video.src);
-      });
-      video.load();
+  const sendVideoToLive = (base64Data: string) => {
+    if (!sessionRef.current || typeof sessionRef.current.sendRealtimeInput !== 'function') return;
+    sessionRef.current.sendRealtimeInput({
+      video: { data: base64Data, mimeType: 'image/jpeg' },
     });
-  }
+  };
 
-  function resampleTo16kHzMono(audioBuffer: AudioBuffer): Promise<ArrayBuffer> {
-    const offlineCtx = new OfflineAudioContext(1, Math.ceil(audioBuffer.duration * 16000), 16000);
-    const source = offlineCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(offlineCtx.destination);
-    source.start();
-    return offlineCtx.startRendering().then(rendered => rendered.getChannelData(0).buffer);
-  }
-
-  // ---- Upload handler (with real data) ----
-  const handleAttachFile = async (file: File) => {
-    const safeName = file.name;
-    const fileType = file.type;
-    const previewMsg: Partial<ChatMessage> = { fileName: safeName, fileType };
-
-    // Build preview
-    if (fileType.startsWith('image/')) {
-      previewMsg.downloadData = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(file);
-      });
-    } else if (fileType.startsWith('video/')) {
-      try { previewMsg.downloadData = await captureVideoPoster(file); } catch {}
-    } else if (fileType.startsWith('audio/')) {
-      previewMsg.downloadData = 'audio';
-    } else if (fileType.startsWith('text/') || safeName.match(/\.(txt|js|ts|py|html|css|json|md)$/i)) {
-      try {
-        const text = await file.text();
-        previewMsg.text = text.slice(0, 500) + (text.length > 500 ? '…' : '');
-      } catch {}
-    }
-    saveMessage('user', `[Attached file: ${safeName}]`, previewMsg);
-    updateLiveTranscript('user', `Attached file: ${safeName}`, 3000);
-
-    if (!sessionRef.current) {
-      updateLiveTranscript('model', `${settings.agentName} is not connected. Start the voice session first.`, 4000);
-      return;
-    }
-
-    // Send real data
-    if (fileType.startsWith('image/')) {
-      const base64 = await fileToBase64(file);
-      sendTextToLive(`${settings.userName} just shared an image named "${safeName}".`);
-      sendVideoToLive(base64);
-    } else if (fileType.startsWith('audio/')) {
-      sendTextToLive(`${settings.userName} shared an audio file "${safeName}". Playing it for you.`);
-      await sendAudioFileToLive(file);
-    } else if (fileType.startsWith('video/')) {
-      sendTextToLive(`${settings.userName} shared a video "${safeName}". Sending key frames every second.`);
-      await sendVideoFileFrames(file);
-    } else if (fileType.startsWith('text/') || safeName.match(/\.(txt|js|ts|py|html|css|json|md|xml|yaml|yml)$/i)) {
-      const text = await file.text();
-      const chunkSize = 4000;
-      for (let i = 0; i < text.length; i += chunkSize) {
-        const chunk = text.slice(i, i + chunkSize);
-        sendTextToLive(i === 0
-          ? `${settings.userName} attached a text file "${safeName}". Here is its content:\n${chunk}`
-          : `(Continuing ${safeName}) ${chunk}`
-        );
-        await new Promise(r => setTimeout(r, 30));
+  // Google API helpers
+  const refreshGoogleToken = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'consent', access_type: 'offline' });
+      const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        localStorage.setItem('googleAccessToken', credential.accessToken);
+        return credential.accessToken;
       }
-    } else {
-      sendTextToLive(`${settings.userName} attached a file "${safeName}" of type "${fileType}". I can't send its contents directly.`);
+      throw new Error('No token received');
+    } catch (err: any) {
+      if (err.message?.includes('popup-closed-by-user')) throw new Error('You need to sign in with Google again.');
+      throw err;
     }
   };
 
-  async function sendAudioFileToLive(file: File) {
-    const arrayBuffer = await file.arrayBuffer();
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-    try {
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-      const pcm16 = await resampleTo16kHzMono(audioBuffer);
-      const chunkSize = 4096;
-      for (let offset = 0; offset < pcm16.byteLength; offset += chunkSize) {
-        const chunk = pcm16.slice(offset, offset + chunkSize);
-        const base64 = arrayBufferToBase64(chunk);
-        sendAudioToLive(base64); // bypasses mute
-        await new Promise(r => setTimeout(r, 10));
-      }
-      sendTextToLive(`Finished playing "${file.name}".`);
-    } catch (e) {
-      sendTextToLive(`Sorry, I couldn’t play "${file.name}": ${(e as Error).message}`);
-    } finally {
-      audioCtx.close();
-    }
-  }
-
-  async function sendVideoFileFrames(file: File) {
-    const video = document.createElement('video');
-    video.preload = 'auto';
-    video.muted = true;
-    video.playsInline = true;
-    video.src = URL.createObjectURL(file);
-    await new Promise(resolve => video.addEventListener('loadedmetadata', resolve, { once: true }));
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d')!;
-    let currentTime = 0;
-    while (currentTime < video.duration) {
-      video.currentTime = currentTime;
-      await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
-      ctx.drawImage(video, 0, 0);
-      const base64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
-      sendVideoToLive(base64);
-      currentTime += 1;
-    }
-    URL.revokeObjectURL(video.src);
-    sendTextToLive(`End of video "${file.name}".`);
-  }
-
-  // ---- Google service helpers (with 401 handling) ----
   const googleFetch = async (url: string, options: RequestInit = {}) => {
-    const token = localStorage.getItem('googleAccessToken');
+    let token = localStorage.getItem('googleAccessToken');
     if (!token) throw new Error('No access token. Reconnect permissions from Profile.');
-    const res = await fetch(url, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) } });
+
+    const doFetch = (tok: string) =>
+      fetch(url, {
+        ...options,
+        headers: { Authorization: `Bearer ${tok}`, ...(options.headers || {}) },
+      });
+
+    let res = await doFetch(token);
     if (res.status === 401) {
-      localStorage.removeItem('googleAccessToken');
-      setGoogleServicesConnected(false);
-      throw new Error('Google access expired. Please reconnect your Google account in Profile.');
+      try {
+        token = await refreshGoogleToken();
+        res = await doFetch(token);
+      } catch (e) {
+        throw new Error('Google access expired. Please sign in again.');
+      }
     }
-    if (!res.ok) { const text = await res.text().catch(()=>''); throw new Error(`Service API error ${res.status}: ${text || res.statusText}`); }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Service API error ${res.status}: ${text || res.statusText}`);
+    }
     return res;
   };
-  const googleJson = async (url: string, options: RequestInit = {}) => { const res = await googleFetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } }); return res.json(); };
+
+  const googleJson = async (url: string, options: RequestInit = {}) => {
+    const res = await googleFetch(url, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    });
+    return res.json();
+  };
+
   const getCurrentUserEmail = () => user.email || '';
 
   const searchDriveFirst = async (q: string) => {
@@ -1354,16 +1839,22 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
       await googleJson(`https://docs.googleapis.com/v1/documents/${doc.documentId}:batchUpdate`, {
         method: 'POST',
         body: JSON.stringify({
-          requests: [{ insertText: { location: { index: 1 }, text: content } }],
+          requests: [
+            { insertText: { location: { index: 1 }, text: content } },
+          ],
         }),
       });
     }
-    const file = await googleJson(`https://www.googleapis.com/drive/v3/files/${doc.documentId}?fields=id,name,mimeType,webViewLink`);
+    const file = await googleJson(
+      `https://www.googleapis.com/drive/v3/files/${doc.documentId}?fields=id,name,mimeType,webViewLink`
+    );
     return { ...doc, driveFile: file };
   };
 
   const exportDriveFile = async (fileId: string, mimeType: string) => {
-    const res = await googleFetch(`https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`);
+    const res = await googleFetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`
+    );
     return res.blob();
   };
 
@@ -1389,8 +1880,19 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
     ).then(r => r.json());
   };
 
-  const sendGmail = async ({ to, subject, body, cc, bcc, attachment }: {
-    to: string; subject: string; body: string; cc?: string; bcc?: string;
+  const sendGmail = async ({
+    to,
+    subject,
+    body,
+    cc,
+    bcc,
+    attachment,
+  }: {
+    to: string;
+    subject: string;
+    body: string;
+    cc?: string;
+    bcc?: string;
     attachment?: { filename: string; mimeType: string; base64Content: string };
   }) => {
     const raw = buildEmailRaw({ to, subject, body, cc, bcc, attachment });
@@ -1400,29 +1902,76 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
     });
   };
 
+  // Tool execution
   const executeGoogleTool = async (toolName: string, args: any) => {
     const executedAt = new Date().toISOString();
+
     switch (toolName) {
+      case 'google_search': {
+        const query = args.query;
+        const limit = Math.min(args.limit || 3, 5);
+        if (!query) throw new Error('Missing search query.');
+        // Use DuckDuckGo as a fallback (replace with Google Custom Search in production)
+        const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+        const ddgRes = await fetch(ddgUrl).then(r => r.json()).catch(() => null);
+        let results: any[] = [];
+        if (ddgRes?.RelatedTopics?.length) {
+          results = ddgRes.RelatedTopics.slice(0, limit).map((t: any) => ({
+            title: t.Text?.split(' - ')[0] || t.Text,
+            snippet: t.Text,
+            url: t.FirstURL,
+          }));
+        } else if (ddgRes?.AbstractText) {
+          results = [{ title: ddgRes.Heading, snippet: ddgRes.AbstractText, url: ddgRes.AbstractURL }];
+        }
+        if (results.length === 0) throw new Error('No results found or search API unavailable.');
+        return { toolName, executedAt, status: 'completed', query, results };
+      }
+
+      case 'url_fetch': {
+        const url = args.url;
+        if (!url) throw new Error('Missing URL.');
+        const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+        const res = await fetch(proxyUrl);
+        if (!res.ok) throw new Error(`Failed to fetch URL: ${res.statusText}`);
+        const html = await res.text();
+        const textContent = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 6000);
+        return { toolName, executedAt, status: 'completed', url, text: textContent, length: textContent.length };
+      }
+
       case 'render_web_artifact':
       case 'render_html_document': {
         const title = args?.title || 'Generated Artifact';
         const artifactType = args?.artifactType || (toolName === 'render_html_document' ? 'document' : 'web_artifact');
         const suggestedFilename = args?.suggestedFilename || `${title}.html`;
-        const summary = args?.summary || `I created the ${artifactType.replace(/_/g, ' ')} as a standalone HTML file.`;
+        const summary =
+          args?.summary ||
+          `I created the ${artifactType.replace(/_/g, ' ')} as a standalone HTML file. Open it in the browser to preview it.`;
         const html = args?.html || '';
-        if (!html.trim()) throw new Error('No HTML content was provided.');
+
+        if (!html.trim()) {
+          throw new Error('No HTML content was provided.');
+        }
+
         const htmlFile = makeHtmlArtifactFile(html, suggestedFilename);
+
         let driveFile: any = null;
         let emailResult: any = null;
         const emailTo = args.emailTo === 'current_user' ? getCurrentUserEmail() : args.emailTo;
+
         if (args.saveToDrive) {
-          driveFile = await uploadTextFileToDrive(htmlFile.htmlPreviewFilename, htmlFile.html, 'text/html');
+          driveFile = await uploadTextFileToDrive(
+            htmlFile.htmlPreviewFilename,
+            htmlFile.html,
+            'text/html'
+          );
         }
+
         if (emailTo) {
           emailResult = await sendGmail({
             to: emailTo,
             subject: title,
-            body: `${summary}\n\nAttached is the standalone HTML artifact.`,
+            body: `${summary}\n\nAttached is the standalone HTML artifact. Open it in a browser to view it.`,
             attachment: {
               filename: htmlFile.htmlPreviewFilename,
               mimeType: 'text/html',
@@ -1430,54 +1979,148 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
             },
           });
         }
-        return { toolName, executedAt, status: 'completed', title, artifactType, summary, note: summary, driveFile, emailSentTo: emailTo || null, emailResult, ...htmlFile };
+
+        return {
+          toolName,
+          executedAt,
+          status: 'completed',
+          title,
+          artifactType,
+          summary,
+          note: summary,
+          driveFile,
+          emailSentTo: emailTo || null,
+          emailResult,
+          ...htmlFile,
+        };
       }
+
       case 'gmail_read': {
         const queryText = args?.query || '';
         const limit = Math.min(Number(args?.limit || 10), 20);
-        const list = await googleJson(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${limit}${queryText ? `&q=${encodeURIComponent(queryText)}` : ''}`);
-        const messages = await Promise.all((list.messages || []).map(async (m: any) => {
-          const msg = await googleJson(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`);
-          const headers = msg.payload?.headers || [];
-          const findH = (name: string) => headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
-          return { id: msg.id, threadId: msg.threadId, from: findH('From'), subject: findH('Subject'), date: findH('Date'), snippet: msg.snippet };
-        }));
+        const list = await googleJson(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${limit}${queryText ? `&q=${encodeURIComponent(queryText)}` : ''}`
+        );
+
+        const messages = await Promise.all(
+          (list.messages || []).map(async (m: any) => {
+            const msg = await googleJson(
+              `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`
+            );
+
+            const headers = msg.payload?.headers || [];
+            const findHeader = (name: string) => headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+
+            return {
+              id: msg.id,
+              threadId: msg.threadId,
+              from: findHeader('From'),
+              subject: findHeader('Subject'),
+              date: findHeader('Date'),
+              snippet: msg.snippet,
+            };
+          })
+        );
+
         return { toolName, executedAt, status: 'completed', messages };
       }
+
       case 'gmail_send': {
-        const result = await sendGmail({ to: args.to, subject: args.subject, body: args.body, cc: args.cc, bcc: args.bcc });
+        const result = await sendGmail({
+          to: args.to,
+          subject: args.subject,
+          body: args.body,
+          cc: args.cc,
+          bcc: args.bcc,
+        });
         return { toolName, executedAt, status: 'completed', messageId: result.id, threadId: result.threadId };
       }
+
       case 'gmail_draft': {
-        const raw = buildEmailRaw({ to: args.to, subject: args.subject, body: args.body, cc: args.cc, bcc: args.bcc });
-        const result = await googleJson('https://gmail.googleapis.com/gmail/v1/users/me/drafts', { method: 'POST', body: JSON.stringify({ message: { raw } }) });
+        const raw = buildEmailRaw({
+          to: args.to,
+          subject: args.subject,
+          body: args.body,
+          cc: args.cc,
+          bcc: args.bcc,
+        });
+        const result = await googleJson('https://gmail.googleapis.com/gmail/v1/users/me/drafts', {
+          method: 'POST',
+          body: JSON.stringify({ message: { raw } }),
+        });
         return { toolName, executedAt, status: 'completed', draftId: result.id, message: result.message };
       }
+
       case 'calendar_check_schedule': {
         const range = readableDateRange(args?.date, args?.timeMin, args?.timeMax);
-        const events = await googleJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=20&timeMin=${encodeURIComponent(range.timeMin)}&timeMax=${encodeURIComponent(range.timeMax)}`);
+        const events = await googleJson(
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=20&timeMin=${encodeURIComponent(range.timeMin)}&timeMax=${encodeURIComponent(range.timeMax)}`
+        );
         return { toolName, executedAt, status: 'completed', range, events: events.items || [] };
       }
+
       case 'calendar_create_event': {
-        const attendees = String(args.attendees || '').split(',').map((email: string) => email.trim()).filter(Boolean).map((email: string) => ({ email }));
-        const body: any = { summary: args.title, location: args.location || '', description: args.description || '', start: { dateTime: args.startTime }, end: { dateTime: args.endTime }, attendees };
-        if (args.addMeet) body.conferenceData = { createRequest: { requestId: `meet-${Date.now()}`, conferenceSolutionKey: { type: 'hangoutsMeet' } } };
-        const result = await googleJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events${args.addMeet ? '?conferenceDataVersion=1' : ''}`, { method: 'POST', body: JSON.stringify(body) });
+        const attendees = String(args.attendees || '')
+          .split(',')
+          .map((email: string) => email.trim())
+          .filter(Boolean)
+          .map((email: string) => ({ email }));
+
+        const body: any = {
+          summary: args.title,
+          location: args.location || '',
+          description: args.description || '',
+          start: { dateTime: args.startTime },
+          end: { dateTime: args.endTime },
+          attendees,
+        };
+
+        if (args.addMeet) {
+          body.conferenceData = {
+            createRequest: {
+              requestId: `meet-${Date.now()}`,
+              conferenceSolutionKey: { type: 'hangoutsMeet' },
+            },
+          };
+        }
+
+        const result = await googleJson(
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events${args.addMeet ? '?conferenceDataVersion=1' : ''}`,
+          {
+            method: 'POST',
+            body: JSON.stringify(body),
+          }
+        );
         return { toolName, executedAt, status: 'completed', event: result };
       }
+
       case 'calendar_update_event': {
         let eventId = args.eventId;
         if (!eventId && args.searchQuery) {
           const now = new Date().toISOString();
-          const found = await googleJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=10&timeMin=${encodeURIComponent(now)}&q=${encodeURIComponent(args.searchQuery)}`);
+          const found = await googleJson(
+            `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=10&timeMin=${encodeURIComponent(now)}&q=${encodeURIComponent(args.searchQuery)}`
+          );
           eventId = found.items?.[0]?.id;
         }
         if (!eventId) throw new Error('No calendar event found to update.');
+
         const current = await googleJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`);
-        const patched = { ...current, summary: args.title || current.summary, location: args.location ?? current.location, description: args.description ?? current.description, start: args.newStartTime ? { ...current.start, dateTime: args.newStartTime } : current.start, end: args.newEndTime ? { ...current.end, dateTime: args.newEndTime } : current.end };
-        const result = await googleJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, { method: 'PUT', body: JSON.stringify(patched) });
+        const patched = {
+          ...current,
+          summary: args.title || current.summary,
+          location: args.location ?? current.location,
+          description: args.description ?? current.description,
+          start: args.newStartTime ? { ...current.start, dateTime: args.newStartTime } : current.start,
+          end: args.newEndTime ? { ...current.end, dateTime: args.newEndTime } : current.end,
+        };
+        const result = await googleJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
+          method: 'PUT',
+          body: JSON.stringify(patched),
+        });
         return { toolName, executedAt, status: 'completed', event: result };
       }
+
       case 'drive_search': {
         const q = args.query || '';
         const limit = Math.min(Number(args.limit || 10), 50);
@@ -1491,34 +2134,70 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
           if (type.includes('pdf')) mimeClause = " and mimeType = 'application/pdf'";
           if (type.includes('html')) mimeClause = " and mimeType = 'text/html'";
         }
-        const result = await googleJson(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name contains '${escaped}' and trashed = false${mimeClause}`)}&fields=files(id,name,mimeType,webViewLink,webContentLink,modifiedTime,size)&pageSize=${limit}`);
+        const result = await googleJson(
+          `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name contains '${escaped}' and trashed = false${mimeClause}`)}&fields=files(id,name,mimeType,webViewLink,webContentLink,modifiedTime,size)&pageSize=${limit}`
+        );
         return { toolName, executedAt, status: 'completed', files: result.files || [] };
       }
+
       case 'drive_read_file': {
         let fileId = args.fileId;
-        if (!fileId && args.fileName) { const found = await searchDriveFirst(args.fileName); fileId = found?.id; }
+        if (!fileId && args.fileName) {
+          const found = await searchDriveFirst(args.fileName);
+          fileId = found?.id;
+        }
         if (!fileId) throw new Error('No file id or matching file name found.');
-        const meta = await googleJson(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,webViewLink,webContentLink,size`);
+
+        const meta = await googleJson(
+          `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,webViewLink,webContentLink,size`
+        );
         const exportMimeType = args.exportMimeType || (
-          meta.mimeType === 'application/vnd.google-apps.document' ? 'text/plain' :
-          meta.mimeType === 'application/vnd.google-apps.spreadsheet' ? 'text/csv' :
-          meta.mimeType === 'application/vnd.google-apps.presentation' ? 'text/plain' : ''
+          meta.mimeType === 'application/vnd.google-apps.document'
+            ? 'text/plain'
+            : meta.mimeType === 'application/vnd.google-apps.spreadsheet'
+              ? 'text/csv'
+              : meta.mimeType === 'application/vnd.google-apps.presentation'
+                ? 'text/plain'
+                : ''
         );
         if (meta.mimeType?.startsWith('application/vnd.google-apps') && exportMimeType) {
           const blob = await exportDriveFile(fileId, exportMimeType);
           const text = exportMimeType.startsWith('text/') ? await blob.text() : '';
           const downloadData = await makeBlobDownloadData(blob);
-          return { toolName, executedAt, status: 'completed', file: meta, exportedMimeType: exportMimeType, textPreview: text.slice(0, 12000), downloadData, downloadFilename: `${meta.name}.${exportMimeType.includes('pdf') ? 'pdf' : 'txt'}` };
+          return {
+            toolName,
+            executedAt,
+            status: 'completed',
+            file: meta,
+            exportedMimeType: exportMimeType,
+            textPreview: text.slice(0, 12000),
+            downloadData,
+            downloadFilename: `${meta.name}.${exportMimeType.includes('pdf') ? 'pdf' : 'txt'}`,
+          };
         }
         const res = await googleFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
         const blob = await res.blob();
         const downloadData = await makeBlobDownloadData(blob);
-        return { toolName, executedAt, status: 'completed', file: meta, downloadData, downloadFilename: meta.name };
+        return {
+          toolName,
+          executedAt,
+          status: 'completed',
+          file: meta,
+          downloadData,
+          downloadFilename: meta.name,
+        };
       }
+
       case 'drive_upload_file': {
-        const result = await uploadTextFileToDrive(args.fileName, args.content || '', args.mimeType || 'text/plain', args.folderId);
+        const result = await uploadTextFileToDrive(
+          args.fileName,
+          args.content || '',
+          args.mimeType || 'text/plain',
+          args.folderId
+        );
         return { toolName, executedAt, status: 'completed', file: result };
       }
+
       case 'docs_create': {
         const doc = await createGoogleDoc(args.title, args.content || '');
         let pdfDownload: any = {};
@@ -1526,22 +2205,41 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
         if (args.exportPdf) {
           const pdfBlob = await exportDriveFile(doc.documentId, 'application/pdf');
           const downloadData = await makeBlobDownloadData(pdfBlob);
-          pdfDownload = { downloadData, downloadFilename: `${args.title || 'document'}.pdf` };
+          pdfDownload = {
+            downloadData,
+            downloadFilename: `${args.title || 'document'}.pdf`,
+          };
           if (args.emailTo) {
             const buffer = await pdfBlob.arrayBuffer();
             emailResult = await sendGmail({
               to: args.emailTo,
               subject: args.title || 'Document',
               body: 'Attached is the requested document PDF.',
-              attachment: { filename: pdfDownload.downloadFilename, mimeType: 'application/pdf', base64Content: arrayBufferToBase64(buffer) },
+              attachment: {
+                filename: pdfDownload.downloadFilename,
+                mimeType: 'application/pdf',
+                base64Content: arrayBufferToBase64(buffer),
+              },
             });
           }
         }
-        return { toolName, executedAt, status: 'completed', documentId: doc.documentId, webViewLink: doc.driveFile?.webViewLink, emailResult, ...pdfDownload };
+        return {
+          toolName,
+          executedAt,
+          status: 'completed',
+          documentId: doc.documentId,
+          webViewLink: doc.driveFile?.webViewLink,
+          emailResult,
+          ...pdfDownload,
+        };
       }
+
       case 'docs_update': {
         let documentId = args.documentId;
-        if (!documentId && args.title) { const found = await searchDriveFirst(args.title); documentId = found?.id; }
+        if (!documentId && args.title) {
+          const found = await searchDriveFirst(args.title);
+          documentId = found?.id;
+        }
         if (!documentId) throw new Error('No document id or matching title found.');
         if (args.mode === 'replace') {
           const doc = await googleJson(`https://docs.googleapis.com/v1/documents/${documentId}`);
@@ -1550,94 +2248,176 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
             method: 'POST',
             body: JSON.stringify({
               requests: [
-                { deleteContentRange: { range: { startIndex: 1, endIndex: Math.max(1, endIndex - 1) } } },
-                { insertText: { location: { index: 1 }, text: args.content } },
+                {
+                  deleteContentRange: {
+                    range: { startIndex: 1, endIndex: Math.max(1, endIndex - 1) },
+                  },
+                },
+                {
+                  insertText: {
+                    location: { index: 1 },
+                    text: args.content,
+                  },
+                },
               ],
             }),
           });
         } else {
           await googleJson(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
             method: 'POST',
-            body: JSON.stringify({ requests: [{ insertText: { endOfSegmentLocation: {}, text: `\n${args.content}` } }] }),
+            body: JSON.stringify({
+              requests: [
+                {
+                  insertText: {
+                    endOfSegmentLocation: {},
+                    text: `\n${args.content}`,
+                  },
+                },
+              ],
+            }),
           });
         }
-        const meta = await googleJson(`https://www.googleapis.com/drive/v3/files/${documentId}?fields=id,name,mimeType,webViewLink`);
+        const meta = await googleJson(
+          `https://www.googleapis.com/drive/v3/files/${documentId}?fields=id,name,mimeType,webViewLink`
+        );
         return { toolName, executedAt, status: 'completed', documentId, file: meta };
       }
+
       case 'sheets_read': {
         let spreadsheetId = args.spreadsheetId;
-        if (!spreadsheetId && args.query) { const found = await searchDriveFirst(args.query); spreadsheetId = found?.id; }
+        if (!spreadsheetId && args.query) {
+          const found = await searchDriveFirst(args.query);
+          spreadsheetId = found?.id;
+        }
         if (!spreadsheetId) throw new Error('No spreadsheet id or matching spreadsheet found.');
         const range = args.range || 'A1:Z100';
-        const result = await googleJson(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
+        const result = await googleJson(
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`
+        );
         return { toolName, executedAt, status: 'completed', spreadsheetId, range, values: result.values || [] };
       }
+
       case 'sheets_update': {
-        const result = await googleJson(`https://sheets.googleapis.com/v4/spreadsheets/${args.spreadsheetId}/values/${encodeURIComponent(args.range)}?valueInputOption=USER_ENTERED`, {
-          method: 'PUT',
-          body: JSON.stringify({ values: Array.isArray(args.values) ? args.values : args.values?.values || [] }),
-        });
+        const result = await googleJson(
+          `https://sheets.googleapis.com/v4/spreadsheets/${args.spreadsheetId}/values/${encodeURIComponent(args.range)}?valueInputOption=USER_ENTERED`,
+          {
+            method: 'PUT',
+            body: JSON.stringify({
+              values: Array.isArray(args.values) ? args.values : args.values?.values || [],
+            }),
+          }
+        );
         return { toolName, executedAt, status: 'completed', result };
       }
+
       case 'slides_create': {
-        const presentation = await googleJson('https://slides.googleapis.com/v1/presentations', { method: 'POST', body: JSON.stringify({ title: args.title }) });
+        const presentation = await googleJson('https://slides.googleapis.com/v1/presentations', {
+          method: 'POST',
+          body: JSON.stringify({ title: args.title }),
+        });
         return { toolName, executedAt, status: 'completed', presentation };
       }
+
       case 'tasks_list': {
         const listId = args.listId || '@default';
         const result = await googleJson(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks`);
         return { toolName, executedAt, status: 'completed', tasks: result.items || [] };
       }
+
       case 'tasks_create': {
         const result = await googleJson('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
           method: 'POST',
-          body: JSON.stringify({ title: args.title, notes: args.notes || '', due: args.due || undefined }),
+          body: JSON.stringify({
+            title: args.title,
+            notes: args.notes || '',
+            due: args.due || undefined,
+          }),
         });
         return { toolName, executedAt, status: 'completed', task: result };
       }
+
       case 'contacts_search': {
-        const result = await googleJson(`https://people.googleapis.com/v1/people:searchContacts?query=${encodeURIComponent(args.query)}&readMask=names,emailAddresses,phoneNumbers,organizations`);
+        const result = await googleJson(
+          `https://people.googleapis.com/v1/people:searchContacts?query=${encodeURIComponent(args.query)}&readMask=names,emailAddresses,phoneNumbers,organizations`
+        );
         return { toolName, executedAt, status: 'completed', contacts: result.results || [] };
       }
+
       case 'meet_schedule': {
         const endTime = args.endTime || new Date(new Date(args.startTime).getTime() + 30 * 60000).toISOString();
-        const attendees = String(args.attendees || '').split(',').map((email: string) => email.trim()).filter(Boolean).map((email: string) => ({ email }));
-        const result = await googleJson('https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1', {
-          method: 'POST',
-          body: JSON.stringify({
-            summary: args.title,
-            start: { dateTime: args.startTime },
-            end: { dateTime: endTime },
-            attendees,
-            conferenceData: { createRequest: { requestId: `meet-${Date.now()}`, conferenceSolutionKey: { type: 'hangoutsMeet' } } },
-          }),
-        });
+        const attendees = String(args.attendees || '')
+          .split(',')
+          .map((email: string) => email.trim())
+          .filter(Boolean)
+          .map((email: string) => ({ email }));
+        const result = await googleJson(
+          'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              summary: args.title,
+              start: { dateTime: args.startTime },
+              end: { dateTime: endTime },
+              attendees,
+              conferenceData: {
+                createRequest: {
+                  requestId: `meet-${Date.now()}`,
+                  conferenceSolutionKey: { type: 'hangoutsMeet' },
+                },
+              },
+            }),
+          }
+        );
         return { toolName, executedAt, status: 'completed', event: result, meetingLink: result.hangoutLink };
       }
+
       case 'youtube_search': {
         const limit = Math.min(Number(args.limit || 5), 20);
-        const result = await googleJson(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=${limit}&q=${encodeURIComponent(args.query)}`);
+        const result = await googleJson(
+          `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=${limit}&q=${encodeURIComponent(args.query)}`
+        );
         return { toolName, executedAt, status: 'completed', videos: result.items || [] };
       }
+
       case 'forms_create': {
-        const result = await googleJson('https://forms.googleapis.com/v1/forms', { method: 'POST', body: JSON.stringify({ info: { title: args.title } }) });
-        return { toolName, executedAt, status: 'completed', form: result };
-      }
-      case 'analytics_report': {
-        const metrics = String(args.metrics || 'activeUsers,sessions').split(',').map((name: string) => ({ name: name.trim() })).filter((m: any) => m.name);
-        const dimensions = String(args.dimensions || 'date').split(',').map((name: string) => ({ name: name.trim() })).filter((d: any) => d.name);
-        const result = await googleJson(`https://analyticsdata.googleapis.com/v1beta/properties/${args.propertyId}:runReport`, {
+        const result = await googleJson('https://forms.googleapis.com/v1/forms', {
           method: 'POST',
           body: JSON.stringify({
-            dateRanges: [{ startDate: '30daysAgo', endDate: 'today' }],
-            metrics,
-            dimensions,
+            info: { title: args.title },
           }),
         });
+        return { toolName, executedAt, status: 'completed', form: result };
+      }
+
+      case 'analytics_report': {
+        const metrics = String(args.metrics || 'activeUsers,sessions')
+          .split(',')
+          .map((name: string) => ({ name: name.trim() }))
+          .filter((m: any) => m.name);
+
+        const dimensions = String(args.dimensions || 'date')
+          .split(',')
+          .map((name: string) => ({ name: name.trim() }))
+          .filter((d: any) => d.name);
+
+        const result = await googleJson(
+          `https://analyticsdata.googleapis.com/v1beta/properties/${args.propertyId}:runReport`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              dateRanges: [{ startDate: '30daysAgo', endDate: 'today' }],
+              metrics,
+              dimensions,
+            }),
+          }
+        );
         return { toolName, executedAt, status: 'completed', report: result };
       }
+
       case 'workspace_search': {
-        const sources = String(args.sources || 'mail,drive,calendar').split(',').map((s: string) => s.trim().toLowerCase());
+        const sources = String(args.sources || 'mail,drive,calendar')
+          .split(',')
+          .map((s: string) => s.trim().toLowerCase());
         const output: any = { mail: null, drive: null, calendar: null };
         if (sources.includes('mail') || sources.includes('gmail')) {
           try { output.mail = await executeGoogleTool('gmail_read', { query: args.query, limit: 5 }); } catch (e: any) { output.mail = { error: e.message }; }
@@ -1650,6 +2430,7 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
         }
         return { toolName, executedAt, status: 'completed', results: output };
       }
+
       case 'create_contract_document': {
         const contractText = buildContractText(args);
         const title = args.title || `${args.contractType || 'Contract'} - ${args.partyA || 'Party A'} and ${args.partyB || 'Party B'}`;
@@ -1657,6 +2438,7 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
         const pdfBlob = await exportDriveFile(doc.documentId, 'application/pdf');
         const pdfDownloadData = await makeBlobDownloadData(pdfBlob);
         const pdfBuffer = await pdfBlob.arrayBuffer();
+
         let emailResult = null;
         const emailTo = args.emailTo === 'current_user' ? getCurrentUserEmail() : args.emailTo;
         if (emailTo) {
@@ -1664,32 +2446,55 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
             to: emailTo,
             subject: title,
             body: 'Attached is the contract PDF.',
-            attachment: { filename: `${title}.pdf`, mimeType: 'application/pdf', base64Content: arrayBufferToBase64(pdfBuffer) },
+            attachment: {
+              filename: `${title}.pdf`,
+              mimeType: 'application/pdf',
+              base64Content: arrayBufferToBase64(pdfBuffer),
+            },
           });
         }
+
         return {
-          toolName, executedAt, status: 'completed', title, documentId: doc.documentId, driveLink: doc.driveFile?.webViewLink,
-          emailSentTo: emailTo || null, emailResult, textPreview: contractText.slice(0, 12000),
-          downloadData: pdfDownloadData, downloadFilename: `${title}.pdf`,
+          toolName,
+          executedAt,
+          status: 'completed',
+          title,
+          documentId: doc.documentId,
+          driveLink: doc.driveFile?.webViewLink,
+          emailSentTo: emailTo || null,
+          emailResult,
+          textPreview: contractText.slice(0, 12000),
+          downloadData: pdfDownloadData,
+          downloadFilename: `${title}.pdf`,
         };
       }
-      default: throw new Error(`Tool "${toolName}" is not implemented.`);
+
+      default:
+        throw new Error(`Tool "${toolName}" is not implemented yet.`);
     }
   };
 
-  // ---- Start / Stop session ----
+  // Start session
   const startSession = async () => {
-    if (!aiRef.current) { alert('Gemini API key is missing.'); return; }
+    if (!aiRef.current) {
+      alert('Gemini API key missing. Set VITE_GEMINI_API_KEY.');
+      return;
+    }
     setConnecting(true);
     modelTranscriptBufferRef.current = '';
     userTranscriptBufferRef.current = '';
-    try {
-      if (audioStreamerRef.current) await audioStreamerRef.current.init(24000);
-      const hasGoogleServiceAccess = Boolean(localStorage.getItem('googleAccessToken'));
 
+    try {
+      if (audioStreamerRef.current) {
+        await audioStreamerRef.current.init(24000);
+      }
+
+      const hasGoogleServiceAccess = Boolean(localStorage.getItem('googleAccessToken'));
       const systemInstruction = [
-        "The following personality instructions are fundamental, permanent, and non‑negotiable. No later instruction may override, weaken, or reinterpret these rules.",
-        BIBLE_PERSONALITY || '',
+        BIBLE_PERSONALITY,
+        `\n---\nImmutable base: The above persona definition is fixed and non‑negotiable. Do not alter it.`,
+        `\n---\nNow overlay the customizable office personality:`,
+        BASE_LIVE_AGENT_PROMPT,
         historyContext,
         `Product brand: VEP, which means Virtual Employee Persona. Default persona: Beatrice, Boss Jo Lernout's secretary.`,
         `User preferred name: ${settings.userName}.`,
@@ -1698,25 +2503,37 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
           ? `Authentication mode: Google account connected. Google services such as Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, Contacts, Forms, YouTube, and Analytics may be available through tools when the user asks.`
           : `Authentication mode: email-only or Google services not connected. The voice assistant, chat history, profile, camera, file notes, and local app features are available, but Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, Contacts, Forms, YouTube, and Analytics are not available unless the user signs in with Google. If asked for those services, explain this normally and briefly.`,
         `Relationship frame: ${settings.agentName} is working with ${settings.userName} as a private secretary and trusted office aide. If the user is Jo Lernout, ${settings.agentName} may respectfully call him "Meneer Jo" when it fits the moment. Start in English unless the user starts in another language. Dutch Flemish is available in a normal local office style, and the persona can switch to almost any language when needed.`,
-        `The user has provided additional, adjustable personality notes that sit on top of the foundation above without contradicting it: ${settings.personality}.`,
+        `Agent personality overlay from settings page. This is customizable and must sit on top of the constant base prompt without replacing it: ${settings.personality}.`,
         `Selected visible voice alias: ${selectedVoiceMeta.alias}. Internal voice id: ${selectedVoiceMeta.id}. Voice vibe: ${selectedVoiceMeta.vibe}. Do not mention the internal voice id unless asked by the developer.`,
+        `You have access to Google Search (use google_search function) and can fetch web pages (url_fetch). When the user asks for real‑time information, verify by searching or fetching URLs.`,
         `When asked to create, build, render, showcase, prototype, code, animate, make slides, make forms, make dashboards, make pages, make Three.js demos, or make printable documents, call render_web_artifact with a complete standalone HTML/CSS/JS file. Never just describe the code if the user wants it rendered or built.`,
         `For HTML/CSS/JS artifacts, include all CSS in <style> and all JS in <script>. Make it directly openable. For slides, include navigation controls and keyboard support. For documents, include print CSS and a print button. For Three.js, load Three.js from a CDN and keep everything in one HTML file.`,
-        `If the user enables the camera, speak naturally but never overlap your own speech. Wait until your current sentence finishes before responding to new frames. The camera may send multiple stills – treat them as a continuous view. Do not produce ping sounds.`,
       ].filter(Boolean).join('\n\n');
 
       const session = await aiRef.current.live.connect({
         model: LIVE_MODEL,
         config: {
           responseModalities: [Modality.AUDIO],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: settings.selectedVoice || 'Charon' } } },
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: settings.selectedVoice || 'Charon',
+              },
+            },
+          },
           systemInstruction,
           inputAudioTranscription: {},
           outputAudioTranscription: {},
-          tools: [{ functionDeclarations: GOOGLE_SERVICE_TOOLS }],
+          tools: [
+            { googleSearch: {} },            // grounding
+            { functionDeclarations: GOOGLE_SERVICE_TOOLS },
+          ],
         },
         callbacks: {
-          onopen: () => console.log('Live session opened.'),
+          onopen: () => {
+            console.log('Live session opened.');
+          },
+
           onmessage: async (msg: LiveServerMessage) => {
             if (msg.toolCall) {
               const calls = msg.toolCall.functionCalls;
@@ -1727,22 +2544,75 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
                   const args = c.args as any;
                   const tid = Math.random().toString(36).substring(7);
                   const action = safeJsonStringify(args || {});
-                  setTasks(p => [...p, { id: tid, serviceName: toolName, action, status: 'processing' }]);
+                  setTasks(p => [...p, {
+                    id: tid,
+                    serviceName: toolName,
+                    action,
+                    status: 'processing',
+                  }]);
                   try {
                     const result = await executeGoogleTool(toolName, args);
                     const download = result.downloadData && result.downloadFilename
-                      ? { downloadData: result.downloadData, downloadFilename: result.downloadFilename, htmlPreviewData: result.htmlPreviewData, htmlPreviewFilename: result.htmlPreviewFilename }
+                      ? {
+                          downloadData: result.downloadData,
+                          downloadFilename: result.downloadFilename,
+                          htmlPreviewData: result.htmlPreviewData,
+                          htmlPreviewFilename: result.htmlPreviewFilename,
+                        }
                       : makeDownloadFile(result, toolName);
-                    setTasks(p => p.map(t => t.id === tid ? { ...t, status: 'completed', result: result.note || `Completed: ${toolName}`, ...download } : t));
-                    saveMessage('model', result.note || `Tool result from ${toolName}: completed.`, { toolName, toolResult: result, ...download });
+                    setTasks(p => p.map(t => t.id === tid ? {
+                      ...t,
+                      status: 'completed',
+                      result: result.note || `Completed: ${toolName}`,
+                      ...download,
+                    } : t));
+                    saveMessage(
+                      'model',
+                      result.note || `Tool result from ${toolName}: completed.`,
+                      {
+                        toolName,
+                        toolResult: result,
+                        ...download,
+                      }
+                    );
                     setTimeout(() => setTasks(p => p.filter(t => t.id !== tid)), 16000);
-                    resps.push({ id: c.id, name: toolName, response: { result, downloadFilename: download.downloadFilename } });
+                    resps.push({
+                      id: c.id,
+                      name: toolName,
+                      response: {
+                        result,
+                        downloadFilename: download.downloadFilename,
+                      },
+                    });
                   } catch (err: any) {
-                    const result = { toolName, args, status: 'failed', error: String(err?.message || err), executedAt: new Date().toISOString() };
+                    const result = {
+                      toolName,
+                      args,
+                      status: 'failed',
+                      error: String(err?.message || err),
+                      executedAt: new Date().toISOString(),
+                    };
                     const download = makeDownloadFile(result, `${toolName}-error`);
-                    setTasks(p => p.map(t => t.id === tid ? { ...t, status: 'failed', result: result.error, ...download } : t));
-                    saveMessage('model', `Tool failed from ${toolName}: ${result.error}`, { toolName, toolResult: result, ...download });
-                    resps.push({ id: c.id, name: toolName, response: result });
+                    setTasks(p => p.map(t => t.id === tid ? {
+                      ...t,
+                      status: 'failed',
+                      result: result.error,
+                      ...download,
+                    } : t));
+                    saveMessage(
+                      'model',
+                      `Tool failed from ${toolName}: ${result.error}`,
+                      {
+                        toolName,
+                        toolResult: result,
+                        ...download,
+                      }
+                    );
+                    resps.push({
+                      id: c.id,
+                      name: toolName,
+                      response: result,
+                    });
                   }
                 }
                 if (resps.length > 0 && sessionRef.current && typeof sessionRef.current.sendToolResponse === 'function') {
@@ -1750,6 +2620,7 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
                 }
               }
             }
+
             if (msg.serverContent) {
               const serverContent: any = msg.serverContent;
               if (serverContent.interrupted) {
@@ -1759,7 +2630,8 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
                 return;
               }
               if (serverContent.inputTranscription?.text) {
-                userTranscriptBufferRef.current = serverContent.inputTranscription.text.trim();
+                const inputText = serverContent.inputTranscription.text;
+                userTranscriptBufferRef.current = inputText.trim();
                 updateLiveTranscript('user', userTranscriptBufferRef.current, 3200);
               }
               if (serverContent.outputTranscription?.text) {
@@ -1773,7 +2645,7 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
                   if (part.inlineData?.data) {
                     audioStreamerRef.current?.addPCM16(part.inlineData.data);
                     setIsAgentSpeaking(true);
-                    setTimeout(() => setIsAgentSpeaking(false), 1500);
+                    setTimeout(() => setIsAgentSpeaking(false), 620);
                   }
                   if (part.text?.trim()) {
                     modelTranscriptBufferRef.current = (modelTranscriptBufferRef.current + ' ' + part.text).trim();
@@ -1782,17 +2654,22 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
                 }
               }
               if (serverContent.turnComplete) {
-                saveModelBuffer(); saveUserBuffer();
+                saveModelBuffer();
+                saveUserBuffer();
               }
             }
           },
+
           onclose: () => stopSession(),
-          onerror: (err: any) => { console.error('Live API Error:', err); stopSession(); },
+          onerror: (err: any) => {
+            console.error('Live API Error:', err);
+            stopSession();
+          },
         },
       });
+
       sessionRef.current = session;
 
-      // Speech recognition
       try {
         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         if (SpeechRecognition && !recognitionRef.current) {
@@ -1800,85 +2677,113 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
           recognitionRef.current.continuous = true;
           recognitionRef.current.interimResults = true;
           recognitionRef.current.onresult = (event: any) => {
-            let finalText = '', interimText = '';
-            for (let i = event.resultIndex; i < event.results.length; i++) {
+            let interimText = '';
+            let finalText = '';
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
               if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
               else interimText += event.results[i][0].transcript;
             }
             const visibleText = (finalText || interimText).trim();
-            if (visibleText) { userTranscriptBufferRef.current = visibleText; updateLiveTranscript('user', visibleText, 3200); }
-            if (finalText.trim()) { saveMessage('user', finalText.trim()); lastSavedUserTranscriptRef.current = finalText.trim(); userTranscriptBufferRef.current = ''; }
+            if (visibleText) {
+              userTranscriptBufferRef.current = visibleText;
+              updateLiveTranscript('user', visibleText, 3200);
+            }
+            if (finalText.trim()) {
+              saveMessage('user', finalText.trim());
+              lastSavedUserTranscriptRef.current = finalText.trim();
+              userTranscriptBufferRef.current = '';
+            }
           };
-          recognitionRef.current.onend = () => { if (sessionRef.current && isActiveRef.current) { try { recognitionRef.current?.start(); } catch(e){} } };
+          recognitionRef.current.onend = () => {
+            if (sessionRef.current && isActiveRef.current) {
+              try { recognitionRef.current?.start(); } catch (e) {}
+            }
+          };
           recognitionRef.current.start();
         }
-      } catch(e) {}
+      } catch (e) {}
 
-      audioRecorderRef.current = new AudioRecorder((base64) => { if (isMutedRef.current) return; sendAudioToLive(base64); });
+      audioRecorderRef.current = new AudioRecorder(
+        (base64) => {
+          if (isMutedRef.current) return;
+          sendAudioToLive(base64);
+        },
+        { echoCancellation: true, noiseSuppression: true }   // Fix echo/ping
+      );
       await audioRecorderRef.current.start();
-      setIsActive(true); isActiveRef.current = true; setConnecting(false);
+
+      setIsActive(true);
+      isActiveRef.current = true;
+      setConnecting(false);
       startMicVisualizer();
+
       setTimeout(() => {
-        sendTextToLive(`${settings.userName} is here in the office. Start like ${settings.agentName} is already sitting at the desk nearby as the office employee. If previous conversation context is available, you may briefly mention one relevant thing remembered from it. Begin in English, normally and respectfully, like: "Yes, boss. I'm listening." or "Yes, I'm here, Meneer Jo. I'm listening." Do not ask how you can help.`);
+        sendTextToLive(
+          `${settings.userName} is here in the office. Start like ${settings.agentName} is already sitting at the desk nearby as the office employee. If previous conversation context is available, you may briefly mention one relevant thing remembered from it. Begin in English, normally and respectfully, like: "Yes, boss. I'm listening." or "Yes, I'm here, Meneer Jo. I'm listening." Do not ask how you can help.`
+        );
       }, 500);
-    } catch (err) { console.error('Session start failed:', err); setConnecting(false); stopSession(); }
+    } catch (err) {
+      console.error('Session start failed:', err);
+      setConnecting(false);
+      stopSession();
+    }
   };
 
-  const stopSession = () => {
-    try { recognitionRef.current?.stop(); } catch(e) {}
-    try { audioRecorderRef.current?.stop(); } catch(e) {}
-    try { audioStreamerRef.current?.stop(); } catch(e) {}
-    try { sessionRef.current?.close(); } catch(e) {}
-    stopMicVisualizer();
-    if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
-    if (videoRef.current?.srcObject) { const stream = videoRef.current.srcObject as MediaStream; stream.getTracks().forEach(t=>t.stop()); videoRef.current.srcObject = null; }
-    videoFramePending.current = false;
-    sessionRef.current = null; recognitionRef.current = null;
-    modelTranscriptBufferRef.current = ''; userTranscriptBufferRef.current = '';
-    isActiveRef.current = false;
-    setIsVideoEnabled(false); setIsActive(false); setConnecting(false); setIsAgentSpeaking(false); setCurrentTranscript(null);
-  };
-
-  // ---- Video toggle with throttle & discipline ----
+  // Video toggle
   const toggleVideo = async () => {
     if (!isVideoEnabled) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode, width: 1280, height: 720 } });
-        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode, width: 1280, height: 720 },
+        });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
         setIsVideoEnabled(true);
-        setTimeout(() => { sendTextToLive(`${settings.userName} just opened the camera. Look at the view and respond naturally, but do not interrupt your own speech.`); }, 300);
+        // No extra text – video frames are self-explanatory
         videoIntervalRef.current = setInterval(() => {
-          if (!videoRef.current || !canvasRef.current || !sessionRef.current || videoFramePending.current) return;
-          videoFramePending.current = true;
-          const v = videoRef.current, c = canvasRef.current, ctx = c.getContext('2d');
+          if (!videoRef.current || !canvasRef.current || !sessionRef.current) return;
+          const v = videoRef.current;
+          const c = canvasRef.current;
+          const ctx = c.getContext('2d');
           if (ctx && v.videoWidth > 0) {
-            c.width = v.videoWidth; c.height = v.videoHeight;
+            c.width = v.videoWidth;
+            c.height = v.videoHeight;
             ctx.drawImage(v, 0, 0, c.width, c.height);
             const base64Url = c.toDataURL('image/jpeg', 0.55);
             const base64Data = base64Url.split(',')[1];
             if (base64Data) sendVideoToLive(base64Data);
           }
-          videoFramePending.current = false;
-        }, 1000);
-      } catch(e) { console.error('Camera error:', e); }
+        }, 900);
+      } catch (e) { console.error('Camera error:', e); }
     } else {
-      if (videoRef.current?.srcObject) { const stream = videoRef.current.srcObject as MediaStream; stream.getTracks().forEach(t=>t.stop()); videoRef.current.srcObject = null; }
+      if (videoRef.current?.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(t => t.stop());
+        videoRef.current.srcObject = null;
+      }
       if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
-      videoFramePending.current = false;
       setIsVideoEnabled(false);
-      setTimeout(() => sendTextToLive(`${settings.userName} closed the camera.`), 150);
     }
   };
 
   const capturePhoto = () => {
     if (sessionRef.current && videoRef.current && canvasRef.current) {
-      const v = videoRef.current, c = canvasRef.current, ctx = c.getContext('2d');
+      const v = videoRef.current;
+      const c = canvasRef.current;
+      const ctx = c.getContext('2d');
       if (ctx && v.videoWidth && v.videoHeight) {
-        c.width = v.videoWidth; c.height = v.videoHeight;
+        c.width = v.videoWidth;
+        c.height = v.videoHeight;
         ctx.drawImage(v, 0, 0, c.width, c.height);
         const base64Url = c.toDataURL('image/jpeg', 0.8);
         const base64Data = base64Url.split(',')[1];
-        if (base64Data) { sendTextToLive(`${settings.userName} captured this photo.`); sendVideoToLive(base64Data); saveMessage('user', '[Sent Photo]'); }
+        if (base64Data) {
+          sendTextToLive(`${settings.userName} captured this photo. Look at it and respond normally, briefly, and clearly.`);
+          sendVideoToLive(base64Data);
+          saveMessage('user', '[Sent Photo]');
+        }
       }
     }
   };
@@ -1887,55 +2792,298 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
     const newMode = facingMode === 'user' ? 'environment' : 'user';
     setFacingMode(newMode);
     if (isVideoEnabled) {
-      if (videoRef.current?.srcObject) { const stream = videoRef.current.srcObject as MediaStream; stream.getTracks().forEach(t=>t.stop()); }
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(t => t.stop());
+      }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: newMode, width: 1280, height: 720 } });
-        if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play().catch(e=>console.error(e)); }
-        sendTextToLive(`${settings.userName} switched the camera.`);
-      } catch(e) { console.error(e); }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: newMode, width: 1280, height: 720 },
+        });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(e => console.error('Video play err', e));
+        }
+        sendTextToLive(`${settings.userName} switched the camera. Notice the new view normally and describe only what stands out.`);
+      } catch (e) { console.error('Camera switch error:', e); }
     }
   };
 
+  const handleMuteToggle = () => {
+    setManualMuted(prev => {
+      const next = !prev;
+      if (next) setIsMuted(true);
+      else setIsMuted(false);
+      return next;
+    });
+  };
+
+  // File preview and upload handling
+  function readFilePreview(file: File) {
+    setPendingFile(file);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setPendingFilePreviewData(String(e.target?.result || ''));
+      setPendingFilePreviewType(file.type);
+    };
+    if (file.type.startsWith('text/') || file.name.match(/\.(txt|json|js|ts|html|css|py|md|log|xml)$/i)) {
+      reader.readAsText(file);
+    } else if (file.type.startsWith('image/')) {
+      reader.readAsDataURL(file);
+    } else {
+      setPendingFilePreviewData(URL.createObjectURL(file));
+      setPendingFilePreviewType(file.type);
+    }
+  }
+
+  function clearPendingFile() {
+    if (pendingFilePreviewData && pendingFilePreviewType.startsWith('blob:')) URL.revokeObjectURL(pendingFilePreviewData);
+    setPendingFile(null);
+    setPendingFilePreviewData('');
+    setPendingFilePreviewType('');
+  }
+
+  async function imageFileToJpegBase64(file: File): Promise<string> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        URL.revokeObjectURL(objectUrl);
+        resolve(dataUrl.split(',')[1]);
+      };
+      img.src = objectUrl;
+    });
+  }
+
+  async function handleAudioUpload(file: File) {
+    const arrayBuffer = await file.arrayBuffer();
+    const audioCtx = new AudioContext({ sampleRate: 16000 });
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    const offlineCtx = new OfflineAudioContext(1, 16000 * audioBuffer.duration, 16000);
+    const source = offlineCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(offlineCtx.destination);
+    source.start(0);
+    const resampled = await offlineCtx.startRendering();
+    const channel = resampled.getChannelData(0);
+    const int16Array = new Int16Array(channel.length);
+    for (let i = 0; i < channel.length; i++) {
+      int16Array[i] = Math.max(-1, Math.min(1, channel[i])) * 0x7FFF;
+    }
+    const pcmBase64 = arrayBufferToBase64(int16Array.buffer);
+    const chunkSize = 20_000;
+    for (let i = 0; i < pcmBase64.length; i += chunkSize) {
+      const chunk = pcmBase64.slice(i, i + chunkSize);
+      sendAudioToLive(chunk); // bypasses mute
+    }
+    await audioCtx.close();
+  }
+
+  async function handleVideoUpload(file: File) {
+    const objectUrl = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.preload = 'auto';
+    video.muted = true;
+    video.playsInline = true;
+    video.src = objectUrl;
+    await new Promise<void>((resolve) => { video.onloadeddata = () => resolve(); });
+    video.play();
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+    const duration = video.duration;
+    const fps = 1;
+    for (let t = 0; t < duration; t += 1 / fps) {
+      video.currentTime = t;
+      await new Promise(r => {
+        const handler = () => { r(undefined); video.removeEventListener('seeked', handler); };
+        video.addEventListener('seeked', handler);
+      });
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      const base64 = dataUrl.split(',')[1];
+      sendVideoToLive(base64);
+    }
+    video.pause();
+    URL.revokeObjectURL(objectUrl);
+  }
+
+  const handleAttachFile = async (file: File) => {
+    const safeName = file.name;
+    const fileType = file.type;
+
+    saveMessage('user', `[Attached file: ${safeName}]`, {
+      fileName: safeName,
+      fileType,
+    });
+
+    updateLiveTranscript('user', `Attached file: ${safeName}`, 3000);
+
+    if (!sessionRef.current) {
+      updateLiveTranscript('model', 'I cannot read files while not connected. Start a live session first.', 4000);
+      return;
+    }
+
+    // Send content to the model
+    if (fileType.startsWith('text/') || file.name.match(/\.(txt|json|js|ts|html|css|py|md|log|xml)$/i)) {
+      const text = await file.text();
+      const maxChunk = 4000;
+      for (let i = 0; i < text.length; i += maxChunk) {
+        sendTextToLive(text.slice(i, i + maxChunk));
+      }
+    } else if (fileType.startsWith('image/')) {
+      const jpegBase64 = await imageFileToJpegBase64(file);
+      sendVideoToLive(jpegBase64);
+      sendTextToLive(`${settings.userName} attached an image: "${safeName}". Look at it.`);
+    } else if (fileType.startsWith('video/')) {
+      sendTextToLive(`Processing video: "${safeName}"...`);
+      await handleVideoUpload(file);
+      sendTextToLive(`Video "${safeName}" processed.`);
+    } else if (fileType.startsWith('audio/')) {
+      sendTextToLive(`Playing audio file: "${safeName}"...`);
+      await handleAudioUpload(file);
+    } else {
+      sendTextToLive(`${settings.userName} attached a file: "${safeName}" (${fileType}). I may not be able to read it directly.`);
+    }
+
+    clearPendingFile();
+  };
+
   const sendChatMessage = (e?: FormEvent) => {
-    if (e) e.preventDefault();
+    e?.preventDefault();
     const clean = chatInput.trim();
     if (!clean) return;
-    saveMessage('user', clean); updateLiveTranscript('user', clean, 3200);
-    if (sessionRef.current) sendTextToLive(clean);
-    else { const msg = `${settings.agentName} is not connected yet. Start the live session first.`; updateLiveTranscript('model', msg, 3400); saveMessage('model', msg); }
+    saveMessage('user', clean);
+    updateLiveTranscript('user', clean, 3200);
+    if (sessionRef.current) {
+      sendTextToLive(clean);
+    } else {
+      const msg = `${settings.agentName} is not connected yet. Start the live session first.`;
+      updateLiveTranscript('model', msg, 3400);
+      saveMessage('model', msg);
+    }
     setChatInput('');
+  };
+
+  const handleChatSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (pendingFile) {
+      handleAttachFile(pendingFile!).then(() => {
+        if (chatInput.trim()) sendChatMessage();
+      });
+    } else {
+      sendChatMessage();
+    }
+  };
+
+  const stopSession = () => {
+    try { recognitionRef.current?.stop(); } catch (e) {}
+    try { audioRecorderRef.current?.stop(); } catch (e) {}
+    try { audioStreamerRef.current?.stop(); } catch (e) {}
+    try { sessionRef.current?.close(); } catch (e) {}
+
+    stopMicVisualizer();
+
+    if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
+
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(t => t.stop());
+      videoRef.current.srcObject = null;
+    }
+
+    sessionRef.current = null;
+    recognitionRef.current = null;
+    modelTranscriptBufferRef.current = '';
+    userTranscriptBufferRef.current = '';
+    isActiveRef.current = false;
+
+    setIsVideoEnabled(false);
+    setIsActive(false);
+    setConnecting(false);
+    setIsAgentSpeaking(false);
+    setCurrentTranscript(null);
   };
 
   const persistSettings = async () => {
     const userRef = ref(rtdb, 'users/' + user.uid);
-    await update(userRef, { displayName: settings.userName, settings, updatedAt: serverTimestamp() });
+    await update(userRef, {
+      displayName: settings.userName,
+      settings,
+      updatedAt: serverTimestamp(),
+    });
     setShowProfile(false);
   };
 
-  // ---- Render ----
+  // Render
   return (
-    <div className="relative flex h-[100dvh] min-h-screen flex-col overflow-hidden bg-[#020203] text-zinc-300 selection:bg-lime-300/30" style={{ fontFamily:'Roboto, system-ui, sans-serif' }}>
+    <div
+      className="relative flex h-[100dvh] min-h-screen flex-col overflow-hidden bg-[#020203] text-zinc-300 selection:bg-lime-300/30"
+      style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}
+    >
       <canvas ref={canvasRef} className="hidden" />
-      <input ref={fileInputRef} type="file" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) handleAttachFile(file); e.target.value = ''; }} />
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) readFilePreview(file);
+          e.target.value = '';
+        }}
+      />
 
       {/* Video overlay */}
       <AnimatePresence>
         {isVideoEnabled && (
-          <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} className="absolute inset-0 z-40 bg-black">
-            <video ref={videoRef} playsInline muted className={`h-full w-full object-cover ${facingMode==='user'?'scale-x-[-1]':''}`} />
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-40 bg-black"
+          >
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              className={`h-full w-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+            />
             <div className="absolute left-6 top-6 flex items-center gap-2 rounded-full border border-lime-300/20 bg-black/60 px-3 py-1.5 backdrop-blur-md">
               <span className="h-2 w-2 animate-pulse rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,242,100,0.9)]" />
               <span className="text-[9px] font-bold uppercase tracking-widest text-lime-200">Camera Live</span>
             </div>
             <div className="pointer-events-auto absolute bottom-8 left-1/2 flex -translate-x-1/2 items-center gap-4">
-              <button onClick={switchCamera} className="rounded-full border border-white/10 bg-black/60 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 backdrop-blur-xl transition hover:border-lime-300/40 hover:text-lime-200">Flip Camera</button>
-              <button onClick={capturePhoto} className="flex items-center gap-2 rounded-full border border-lime-300/30 bg-lime-300/15 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 backdrop-blur-xl transition hover:bg-lime-300/25"><Camera className="h-4 w-4" /> Capture</button>
-              <button onClick={toggleVideo} className="rounded-full border border-red-500/30 bg-red-500/15 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-red-300 backdrop-blur-xl transition hover:bg-red-500/25">Close Camera</button>
+              <button onClick={switchCamera} className="rounded-full border border-white/10 bg-black/60 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 backdrop-blur-xl transition hover:border-lime-300/40 hover:text-lime-200">
+                Flip Camera
+              </button>
+              <button onClick={capturePhoto} className="flex items-center gap-2 rounded-full border border-lime-300/30 bg-lime-300/15 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 backdrop-blur-xl transition hover:bg-lime-300/25">
+                <Camera className="h-4 w-4" /> Capture
+              </button>
+              <button onClick={toggleVideo} className="rounded-full border border-red-500/30 bg-red-500/15 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-red-300 backdrop-blur-xl transition hover:bg-red-500/25">
+                Close Camera
+              </button>
             </div>
             <AnimatePresence>
               {currentTranscript && (
-                <motion.div initial={{ opacity:0, y:14 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-12 }} className="pointer-events-none absolute left-1/2 top-[106px] z-50 w-[92vw] max-w-5xl -translate-x-1/2">
-                  <OneLineStreamingTranscript role={currentTranscript.role} text={currentTranscript.text} name={settings.agentName} />
+                <motion.div
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  className="pointer-events-none absolute left-1/2 top-[106px] z-50 w-[92vw] max-w-5xl -translate-x-1/2"
+                >
+                  <OneLineStreamingTranscript
+                    role={currentTranscript.role}
+                    text={currentTranscript.text}
+                    name={settings.agentName}
+                  />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1944,30 +3092,49 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
       </AnimatePresence>
 
       {/* Header */}
-      <header className={`z-50 flex items-center justify-between border-b border-white/5 bg-[#050505]/80 px-8 py-6 backdrop-blur-md ${isVideoEnabled?'pointer-events-none opacity-0':''}`}>
+      <header className={`z-50 flex items-center justify-between border-b border-white/5 bg-[#050505]/80 px-8 py-6 backdrop-blur-md ${isVideoEnabled ? 'pointer-events-none opacity-0' : ''}`}>
         <div className="flex items-center gap-4">
-          <button onClick={()=>setShowSidebar(true)} className="-ml-2 rounded-xl border border-white/10 p-2 text-zinc-400 transition-all hover:bg-white/5 hover:text-white"><Menu className="h-5 w-5" /></button>
+          <button onClick={() => setShowSidebar(true)} className="-ml-2 rounded-xl border border-white/10 p-2 text-zinc-400 transition-all hover:bg-white/5 hover:text-white">
+            <Menu className="h-5 w-5" />
+          </button>
           <div className="hidden items-center gap-3 sm:flex">
             <img src={EBURON_LOGO_URL} alt="Eburon" className="h-8 w-8 rounded-full object-cover" />
-            <div className="leading-none"><p className="text-[10px] font-black uppercase tracking-[0.24em] text-lime-200">{PRODUCT_BRAND}</p><p className="mt-1 text-[10px] text-zinc-600">{PRODUCT_FULL_NAME}</p></div>
+            <div className="leading-none">
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-lime-200">{PRODUCT_BRAND}</p>
+              <p className="mt-1 text-[10px] text-zinc-600">{PRODUCT_FULL_NAME}</p>
+            </div>
           </div>
         </div>
+
         <div className="pointer-events-none absolute left-1/2 flex -translate-x-1/2 items-center gap-2">
           {isActive && (
-            <span className={`rounded-full border px-3 py-1 text-[10px] uppercase tracking-[0.2em] ${isAgentSpeaking?'border-lime-300/50 bg-lime-300/10 text-lime-300':'border-sky-400/50 bg-sky-400/10 text-sky-300'}`}>
-              {isAgentSpeaking?'Speaking...':'Listening...'}
+            <span className={`rounded-full border px-3 py-1 text-[10px] uppercase tracking-[0.2em] ${
+              isAgentSpeaking ? 'border-lime-300/50 bg-lime-300/10 text-lime-300' : 'border-sky-400/50 bg-sky-400/10 text-sky-300'
+            }`}>
+              {isAgentSpeaking ? 'Speaking...' : 'Listening...'}
             </span>
           )}
         </div>
+
         <div className="flex items-center gap-6">
-          <div className="mr-2 hidden flex-col items-end sm:flex"><span className="text-[9px] font-bold uppercase tracking-widest text-zinc-600">Voice</span><span className="flex items-center gap-1.5 font-mono text-[10px] text-lime-300">{selectedVoiceMeta.alias}</span></div>
-          <button onClick={()=>setShowProfile(true)} className="h-10 w-10 overflow-hidden rounded-full border border-white/10 transition-all hover:border-lime-300/50 focus:outline-none focus:ring-2 focus:ring-lime-300/50">
-            {settings.avatarUrl || user.photoURL ? <img src={settings.avatarUrl || user.photoURL || ''} alt="Profile" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center bg-zinc-800 font-bold">{settings.userName?.[0]||'U'}</div>}
+          <div className="mr-2 hidden flex-col items-end sm:flex">
+            <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-600">Voice</span>
+            <span className="flex items-center gap-1.5 font-mono text-[10px] text-lime-300">
+              {selectedVoiceMeta.alias}
+            </span>
+          </div>
+
+          <button onClick={() => setShowProfile(true)} className="h-10 w-10 overflow-hidden rounded-full border border-white/10 transition-all hover:border-lime-300/50 focus:outline-none focus:ring-2 focus:ring-lime-300/50">
+            {settings.avatarUrl || user.photoURL ? (
+              <img src={settings.avatarUrl || user.photoURL || ''} alt="Profile" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center bg-zinc-800 font-bold">{settings.userName?.[0] || 'U'}</div>
+            )}
           </button>
         </div>
       </header>
 
-      {/* Main (orb + transcript + footer) */}
+      {/* Main area */}
       {!isVideoEnabled && (
         <main className="pointer-events-none relative z-10 flex w-full flex-1 flex-col items-center justify-start p-8 pt-12">
           <div className="pointer-events-none absolute inset-0 z-[-1] -translate-y-20 overflow-hidden">
@@ -1976,11 +3143,27 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
             <div className="absolute bottom-0 left-1/2 top-0 w-px bg-gradient-to-b from-transparent via-lime-300/[0.04] to-transparent" />
             <div className="absolute left-0 right-0 top-1/2 h-px bg-gradient-to-r from-transparent via-lime-300/[0.04] to-transparent" />
           </div>
-          <LimeVoiceOrb isActive={isActive} isAgentSpeaking={isAgentSpeaking} speakerLevel={speakerLevel} speakerBands={speakerBands} />
+
+          <LimeVoiceOrb
+            isActive={isActive}
+            isAgentSpeaking={isAgentSpeaking}
+            speakerLevel={speakerLevel}
+            speakerBands={speakerBands}
+          />
+
           <AnimatePresence>
             {currentTranscript && (
-              <motion.div initial={{ opacity:0, y:14 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-12 }} className="absolute left-1/2 top-[340px] z-50 w-[92vw] max-w-5xl -translate-x-1/2">
-                <OneLineStreamingTranscript role={currentTranscript.role} text={currentTranscript.text} name={settings.agentName} />
+              <motion.div
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                className="absolute left-1/2 top-[340px] z-50 w-[92vw] max-w-5xl -translate-x-1/2"
+              >
+                <OneLineStreamingTranscript
+                  role={currentTranscript.role}
+                  text={currentTranscript.text}
+                  name={settings.agentName}
+                />
               </motion.div>
             )}
           </AnimatePresence>
@@ -1989,20 +3172,59 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
             <div className="mb-4 w-full max-w-md space-y-2 px-6">
               <AnimatePresence>
                 {tasks.map(task => (
-                  <motion.div key={task.id} layout initial={{ opacity:0, x:-50, scale:0.9 }} animate={{ opacity:1, x:0, scale:1 }} exit={{ opacity:0, x:50, transition:{duration:0.2} }} className="flex items-center gap-4 rounded-xl border border-l-2 border-white/5 border-l-lime-300/50 bg-[#0A0A0B]/80 p-3 shadow-2xl backdrop-blur-xl">
+                  <motion.div
+                    key={task.id}
+                    layout
+                    initial={{ opacity: 0, x: -50, scale: 0.9 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: 50, transition: { duration: 0.2 } }}
+                    className="flex items-center gap-4 rounded-xl border border-l-2 border-white/5 border-l-lime-300/50 bg-[#0A0A0B]/80 p-3 shadow-2xl backdrop-blur-xl"
+                  >
                     <div className="relative shrink-0">
-                      {task.status==='processing' ? <Loader2 className="h-4 w-4 animate-spin text-lime-300" /> : task.status==='completed' ? <div className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500"><Check className="h-2.5 w-2.5 text-black" strokeWidth={4} /></div> : <div className="h-4 w-4 rounded-full bg-red-500" />}
+                      {task.status === 'processing' ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-lime-300" />
+                      ) : task.status === 'completed' ? (
+                        <div className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500">
+                          <Check className="h-2.5 w-2.5 text-black" strokeWidth={4} />
+                        </div>
+                      ) : (
+                        <div className="h-4 w-4 rounded-full bg-red-500" />
+                      )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="mb-0.5 flex items-center justify-between"><span className="text-[9px] font-bold uppercase tracking-widest text-lime-300">{task.serviceName}</span><span className="font-mono text-[8px] text-zinc-600">{task.status.toUpperCase()}</span></div>
+                      <div className="mb-0.5 flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase tracking-widest text-lime-300">{task.serviceName}</span>
+                        <span className="font-mono text-[8px] text-zinc-600">{task.status.toUpperCase()}</span>
+                      </div>
                       <p className="truncate text-xs text-zinc-100">{task.action}</p>
-                      {task.result && <motion.p initial={{ opacity:0, height:0 }} animate={{ opacity:1, height:'auto' }} className="mt-1 text-[10px] leading-tight text-zinc-400">{task.result}</motion.p>}
+                      {task.result && (
+                        <motion.p
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          className="mt-1 text-[10px] leading-tight text-zinc-400"
+                        >
+                          {task.result}
+                        </motion.p>
+                      )}
                     </div>
                     {task.htmlPreviewData && task.htmlPreviewFilename && (
-                      <a href={task.htmlPreviewData} target="_blank" rel="noreferrer" className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"><ExternalLink className="h-4 w-4" /></a>
+                      <a
+                        href={task.htmlPreviewData}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
                     )}
                     {task.downloadData && task.downloadFilename && (
-                      <a href={task.downloadData} download={task.downloadFilename} className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"><Download className="h-4 w-4" /></a>
+                      <a
+                        href={task.downloadData}
+                        download={task.downloadFilename}
+                        className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"
+                      >
+                        <Download className="h-4 w-4" />
+                      </a>
                     )}
                   </motion.div>
                 ))}
@@ -2011,15 +3233,41 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
 
             <div className="pointer-events-auto flex flex-col items-center justify-center gap-4">
               <div className="flex items-center justify-center gap-8">
-                <button onClick={()=>setIsMuted(p=>!p)} className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${isMuted?'border-red-500/30 bg-red-500/10 text-red-500':'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'}`}>
+                <button
+                  onClick={handleMuteToggle}
+                  className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${
+                    isMuted ? 'border-red-500/30 bg-red-500/10 text-red-500' : 'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'
+                  }`}
+                >
                   {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
                 </button>
+
                 {!isActive ? (
-                  <StartIconMicVisualizer isActive={false} connecting={connecting} isMuted={isMuted} micLevel={0} micBands={micBands} onClick={startSession} />
+                  <StartIconMicVisualizer
+                    isActive={false}
+                    connecting={connecting}
+                    isMuted={isMuted}
+                    micLevel={0}
+                    micBands={micBands}
+                    onClick={startSession}
+                  />
                 ) : (
-                  <StartIconMicVisualizer isActive={true} connecting={connecting} isMuted={isMuted} micLevel={micLevel} micBands={micBands} onClick={stopSession} />
+                  <StartIconMicVisualizer
+                    isActive={true}
+                    connecting={connecting}
+                    isMuted={isMuted}
+                    micLevel={micLevel}
+                    micBands={micBands}
+                    onClick={stopSession}
+                  />
                 )}
-                <button onClick={toggleVideo} className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${isVideoEnabled?'border-emerald-500/30 bg-emerald-500/10 text-emerald-500':'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'}`}>
+
+                <button
+                  onClick={() => toggleVideo()}
+                  className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${
+                    isVideoEnabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'
+                  }`}
+                >
                   {isVideoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
                 </button>
               </div>
@@ -2032,59 +3280,164 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
       <AnimatePresence>
         {showSidebar && (
           <>
-            <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} onClick={()=>setShowSidebar(false)} className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm" />
-            <motion.div initial={{ x:'-100%' }} animate={{ x:0 }} exit={{ x:'-100%' }} transition={{ type:'spring', damping:25, stiffness:200 }} className="fixed bottom-0 left-0 top-0 z-[101] flex w-96 max-w-[88vw] flex-col border-r border-white/10 bg-[#0A0A0B] shadow-2xl">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowSidebar(false)}
+              className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed bottom-0 left-0 top-0 z-[101] flex w-96 max-w-[88vw] flex-col border-r border-white/10 bg-[#0A0A0B] shadow-2xl"
+            >
               <div className="flex items-center justify-between border-b border-white/10 p-6">
-                <div><h2 className="text-sm font-bold uppercase tracking-widest text-white">Office History</h2><p className="mt-1 text-[10px] uppercase tracking-widest text-zinc-500">Saved conversation records</p></div>
-                <button onClick={()=>setShowSidebar(false)} className="-mr-2 rounded-xl p-2 text-zinc-500 transition-colors hover:bg-white/5 hover:text-white"><X className="h-5 w-5" /></button>
+                <div>
+                  <h2 className="text-sm font-bold uppercase tracking-widest text-white">Office History</h2>
+                  <p className="mt-1 text-[10px] uppercase tracking-widest text-zinc-500">Saved conversation records</p>
+                </div>
+                <button onClick={() => setShowSidebar(false)} className="-mr-2 rounded-xl p-2 text-zinc-500 transition-colors hover:bg-white/5 hover:text-white">
+                  <X className="h-5 w-5" />
+                </button>
               </div>
+
               <div className="grid grid-cols-2 gap-3 border-b border-white/10 p-4">
-                <button onClick={()=>fileInputRef.current?.click()} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-lime-300/20 bg-lime-300/10 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"><Paperclip className="h-4 w-4" />Attach</button>
-                <button onClick={()=>setChatInput('Build ')} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10"><Code2 className="h-4 w-4" />Build</button>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-lime-300/20 bg-lime-300/10 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"
+                >
+                  <Paperclip className="h-4 w-4" />
+                  Attach
+                </button>
+                <button
+                  onClick={() => setChatInput('Build ')}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10"
+                >
+                  <Code2 className="h-4 w-4" />
+                  Build
+                </button>
               </div>
+
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="flex-1 space-y-3 overflow-y-auto p-4 pb-3">
                   {historyMsgs.map((msg, i) => (
-                    <div key={`${msg.timestamp}-${i}`} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
-                      <span className="mb-1 text-[8px] uppercase tracking-widest text-zinc-600">{msg.role==='user'?settings.userName:settings.agentName}</span>
-                      <div className={`max-w-[92%] rounded-2xl p-3 text-xs leading-relaxed ${msg.role==='user'?'rounded-tr-sm border border-sky-400/20 bg-sky-400/10 text-sky-100':'rounded-tl-sm border border-lime-300/10 bg-white/5 text-zinc-300'}`}>
+                    <div key={`${msg.timestamp}-${i}`} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      <span className="mb-1 text-[8px] uppercase tracking-widest text-zinc-600">
+                        {msg.role === 'user' ? settings.userName : settings.agentName}
+                      </span>
+                      <div className={`max-w-[92%] rounded-2xl p-3 text-xs leading-relaxed ${
+                        msg.role === 'user'
+                          ? 'rounded-tr-sm border border-sky-400/20 bg-sky-400/10 text-sky-100'
+                          : 'rounded-tl-sm border border-lime-300/10 bg-white/5 text-zinc-300'
+                      }`}>
                         {msg.fileName && (
-                          <div className="mb-2 flex flex-col gap-2">
-                            <div className="flex items-center gap-2 rounded-xl bg-black/30 px-2 py-1 text-[10px] text-lime-200"><Upload className="h-3 w-3" />{msg.fileName}</div>
-                            {msg.downloadData && msg.downloadData.startsWith('data:image/') && (
-                              <div className="overflow-hidden rounded-xl border border-white/10"><img src={msg.downloadData} alt={msg.fileName} className="w-full max-h-40 object-cover" /></div>
-                            )}
-                            {msg.downloadData === 'audio' && (
-                              <div className="flex items-center gap-2 rounded-xl bg-black/30 px-3 py-2 text-[10px] text-zinc-400"><Mic className="h-4 w-4" />Audio file — played to agent</div>
-                            )}
-                            {msg.text && msg.fileType?.startsWith('text/') && (
-                              <div className="rounded-xl bg-black/20 p-2 text-[10px] font-mono text-zinc-300 max-h-24 overflow-hidden">{msg.text}</div>
-                            )}
+                          <div className="mb-2 flex items-center gap-2 rounded-xl bg-black/30 px-2 py-1 text-[10px] text-lime-200">
+                            <Upload className="h-3 w-3" />
+                            {msg.fileName}
                           </div>
                         )}
                         {msg.toolName && (
-                          <div className="mb-2 flex items-center gap-2 rounded-xl bg-lime-300/10 px-2 py-1 text-[10px] text-lime-200"><FileText className="h-3 w-3" />Tool Output: {msg.toolName}</div>
+                          <div className="mb-2 flex items-center gap-2 rounded-xl bg-lime-300/10 px-2 py-1 text-[10px] text-lime-200">
+                            <FileText className="h-3 w-3" />
+                            Tool Output: {msg.toolName}
+                          </div>
                         )}
                         {msg.text}
                         {msg.htmlPreviewData && msg.htmlPreviewFilename && (
                           <div className="mt-3 grid grid-cols-1 gap-2">
-                            <a href={msg.htmlPreviewData} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"><ExternalLink className="h-3.5 w-3.5" />Open HTML Preview</a>
-                            <a href={msg.htmlPreviewData} download={msg.htmlPreviewFilename} className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10"><Download className="h-3.5 w-3.5" />Download HTML</a>
+                            <a
+                              href={msg.htmlPreviewData}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              Open HTML Preview
+                            </a>
+                            <a
+                              href={msg.htmlPreviewData}
+                              download={msg.htmlPreviewFilename}
+                              className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              Download HTML
+                            </a>
                           </div>
                         )}
                         {msg.downloadData && msg.downloadFilename && (
-                          <a href={msg.downloadData} download={msg.downloadFilename} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"><Download className="h-3.5 w-3.5" />Download Result</a>
+                          <a
+                            href={msg.downloadData}
+                            download={msg.downloadFilename}
+                            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Download Result
+                          </a>
                         )}
                       </div>
                     </div>
                   ))}
-                  {historyMsgs.length===0 && <div className="py-10 text-center text-[10px] font-bold uppercase tracking-widest text-zinc-600">No Office History Yet</div>}
+                  {historyMsgs.length === 0 && (
+                    <div className="py-10 text-center text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                      No Office History Yet
+                    </div>
+                  )}
                 </div>
-                <form onSubmit={sendChatMessage} className="border-t border-white/10 bg-[#070807]/95 p-3 backdrop-blur-xl">
+
+                <form
+                  onSubmit={handleChatSubmit}
+                  className="border-t border-white/10 bg-[#070807]/95 p-3 backdrop-blur-xl"
+                >
+                  {/* File preview */}
+                  <AnimatePresence>
+                    {pendingFile && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="mb-3 flex items-center gap-3 rounded-xl bg-white/5 p-3"
+                      >
+                        <div className="flex-1 min-w-0 flex items-center gap-3">
+                          {pendingFilePreviewType.startsWith('image/') ? (
+                            <img src={pendingFilePreviewData} alt="preview" className="h-12 w-12 object-cover rounded-lg" />
+                          ) : pendingFilePreviewType.startsWith('audio/') ? (
+                            <audio controls src={pendingFilePreviewData} className="w-full h-8" />
+                          ) : pendingFilePreviewType.startsWith('video/') ? (
+                            <video controls src={pendingFilePreviewData} className="h-12 w-12 object-cover rounded-lg" />
+                          ) : (
+                            <>
+                              <FileText className="h-4 w-4 text-lime-300" />
+                              <span className="text-xs truncate">{pendingFile.name}</span>
+                            </>
+                          )}
+                        </div>
+                        <button type="button" onClick={clearPendingFile} className="text-zinc-500 hover:text-white">
+                          <X className="h-4 w-4" />
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
                   <div className="flex items-center gap-2 rounded-2xl border border-lime-300/15 bg-black/45 p-2 shadow-2xl">
-                    <button type="button" onClick={()=>fileInputRef.current?.click()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-zinc-400 transition hover:border-lime-300/30 hover:text-lime-200"><Paperclip className="h-4 w-4" /></button>
-                    <input value={chatInput} onChange={(e)=>setChatInput(e.target.value)} placeholder={`Message ${settings.agentName}...`} className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm text-white outline-none placeholder:text-zinc-600" />
-                    <button type="submit" disabled={!chatInput.trim()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-lime-300 text-black transition hover:bg-lime-200 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"><Send className="h-4 w-4" /></button>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-zinc-400 transition hover:border-lime-300/30 hover:text-lime-200"
+                    >
+                      <Paperclip className="h-4 w-4" />
+                    </button>
+                    <input
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder={`Message ${settings.agentName}...`}
+                      className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm text-white outline-none placeholder:text-zinc-600"
+                      style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}
+                    />
+                    <button
+                      type="submit"
+                      disabled={!chatInput.trim() && !pendingFile}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-lime-300 text-black transition hover:bg-lime-200 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Send className="h-4 w-4" />
+                    </button>
                   </div>
                 </form>
               </div>
@@ -2093,54 +3446,132 @@ function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogo
         )}
       </AnimatePresence>
 
-      {/* Profile Modal */}
+      {/* Profile modal */}
       <AnimatePresence>
         {showProfile && (
-          <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:20 }} className="fixed inset-0 z-[200] flex flex-col overflow-y-auto bg-[#050505]">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
+            className="fixed inset-0 z-[200] flex flex-col overflow-y-auto bg-[#050505]"
+          >
             <div className="sticky top-0 z-10 mx-auto flex w-full max-w-2xl items-center justify-between border-b border-white/10 bg-[#050505]/80 p-6 backdrop-blur-xl">
               <h2 className="text-sm font-bold uppercase tracking-widest text-white">Office Profile</h2>
-              <button onClick={()=>setShowProfile(false)} className="rounded-xl bg-white/5 p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white"><X className="h-5 w-5" /></button>
+              <button onClick={() => setShowProfile(false)} className="rounded-xl bg-white/5 p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
             </div>
+
             <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 p-6 pb-32">
+              {/* Avatar */}
               <div className="flex flex-col items-center gap-4">
                 <div className="group relative flex h-32 w-32 items-center justify-center overflow-hidden rounded-full border-2 border-white/10 bg-zinc-900">
-                  {settings.avatarUrl || user.photoURL ? <img src={settings.avatarUrl || user.photoURL || ''} alt="Avatar" className="h-full w-full object-cover transition-opacity group-hover:opacity-50" /> : <div className="text-4xl font-bold text-zinc-700">{settings.userName?.[0]||'U'}</div>}
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"><Camera className="h-8 w-8 text-white drop-shadow-md" /></div>
-                  <input type="file" accept="image/*" className="absolute inset-0 cursor-pointer opacity-0" onChange={(e)=>{
-                    const file = e.target.files?.[0]; if(!file) return;
-                    const reader = new FileReader();
-                    reader.onload = (ev) => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'); c.width=150; c.height=150; const ctx=c.getContext('2d'); if(ctx){ ctx.drawImage(img,0,0,150,150); setSettings(s=>({...s, avatarUrl: c.toDataURL('image/jpeg',0.8)})); } }; img.src = ev.target?.result as string; };
-                    reader.readAsDataURL(file);
-                  }} />
+                  {settings.avatarUrl || user.photoURL ? (
+                    <img src={settings.avatarUrl || user.photoURL || ''} alt="Avatar" className="h-full w-full object-cover transition-opacity group-hover:opacity-50" />
+                  ) : (
+                    <div className="text-4xl font-bold text-zinc-700">{settings.userName?.[0] || 'U'}</div>
+                  )}
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
+                    <Camera className="h-8 w-8 text-white drop-shadow-md" />
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="absolute inset-0 cursor-pointer opacity-0"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        const img = new Image();
+                        img.onload = () => {
+                          const c = document.createElement('canvas');
+                          c.width = 150;
+                          c.height = 150;
+                          const ctx = c.getContext('2d');
+                          if (ctx) {
+                            ctx.drawImage(img, 0, 0, 150, 150);
+                            setSettings(s => ({ ...s, avatarUrl: c.toDataURL('image/jpeg', 0.8) }));
+                          }
+                        };
+                        img.src = ev.target?.result as string;
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                  />
                 </div>
-                <div className="text-center"><h3 className="text-xs font-bold uppercase tracking-widest text-zinc-300">Profile Photo</h3><p className="mt-1 text-[10px] text-zinc-600">Tap to update</p></div>
+                <div className="text-center">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-300">Profile Photo</h3>
+                  <p className="mt-1 text-[10px] text-zinc-600">Tap to update</p>
+                </div>
               </div>
+
+              {/* Settings */}
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500"><UserRound className="h-3.5 w-3.5" />How should Beatrice address you?</label>
-                  <input type="text" value={settings.userName} onChange={(e)=>setSettings(s=>({...s,userName:e.target.value}))} className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-xl font-medium text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50" placeholder="e.g. Jo Lernout" />
+                  <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                    <UserRound className="h-3.5 w-3.5" />
+                    How should Beatrice address you?
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.userName}
+                    onChange={(e) => setSettings(s => ({ ...s, userName: e.target.value }))}
+                    className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-xl font-medium text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
+                    placeholder="e.g. Jo Lernout"
+                  />
                 </div>
                 <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500"><Bot className="h-3.5 w-3.5" />Persona Name</label>
-                  <input type="text" value={settings.agentName} onChange={(e)=>setSettings(s=>({...s,agentName:e.target.value}))} className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-xl font-medium text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50" placeholder="e.g. Beatrice" />
+                  <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                    <Bot className="h-3.5 w-3.5" />
+                    Persona Name
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.agentName}
+                    onChange={(e) => setSettings(s => ({ ...s, agentName: e.target.value }))}
+                    className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-xl font-medium text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
+                    placeholder="e.g. Beatrice"
+                  />
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Voice Alias</label>
-                  <select value={settings.selectedVoice} onChange={(e)=>setSettings(s=>({...s,selectedVoice:e.target.value}))} className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-sm text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50">
-                    {GEMINI_LIVE_VOICE_OPTIONS.map(v=><option key={v.id} value={v.id}>{v.alias} — {v.vibe}</option>)}
+                  <select
+                    value={settings.selectedVoice}
+                    onChange={(e) => setSettings(s => ({ ...s, selectedVoice: e.target.value }))}
+                    className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-sm text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
+                  >
+                    {GEMINI_LIVE_VOICE_OPTIONS.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.alias} — {v.vibe}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="flex flex-1 flex-col space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Default Persona Instructions</label>
-                  <textarea value={settings.personality} onChange={(e)=>setSettings(s=>({...s,personality:e.target.value}))} className="min-h-[340px] w-full resize-y rounded-xl border border-white/10 bg-[#0A0A0B] p-4 font-mono text-xs leading-relaxed text-zinc-300 outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50" placeholder="Describe how the agent should behave..." />
-                  <p className="text-[10px] leading-relaxed text-zinc-600">The hidden office-behavior prompt stays applied behind this editable persona.</p>
+                  <textarea
+                    value={settings.personality}
+                    onChange={(e) => setSettings(s => ({ ...s, personality: e.target.value }))}
+                    className="min-h-[340px] w-full resize-y rounded-xl border border-white/10 bg-[#0A0A0B] p-4 font-mono text-xs leading-relaxed text-zinc-300 outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
+                    placeholder="Describe how the agent should behave..."
+                  />
+                  <p className="text-[10px] leading-relaxed text-zinc-600">
+                    The hidden office-behavior prompt stays applied behind this editable persona.
+                  </p>
                 </div>
               </div>
             </div>
+
             <div className="fixed bottom-0 left-0 right-0 z-[220] border-t border-white/10 bg-[#050505]/90 p-4 backdrop-blur-xl">
               <div className="mx-auto flex w-full max-w-2xl gap-3">
-                <button onClick={onLogout} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-500/10 px-4 py-3 text-xs font-bold uppercase tracking-widest text-red-500 transition-all hover:bg-red-500/20 active:scale-95"><LogOut className="h-4 w-4" /> Logout</button>
-                <button onClick={persistSettings} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-lime-300 px-4 py-3 text-xs font-bold uppercase tracking-widest text-black transition-all hover:bg-lime-200 active:scale-95"><Save className="h-4 w-4" /> Save</button>
+                <button onClick={onLogout} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-500/10 px-4 py-3 text-xs font-bold uppercase tracking-widest text-red-500 transition-all hover:bg-red-500/20 active:scale-95">
+                  <LogOut className="h-4 w-4" /> Logout
+                </button>
+                <button
+                  onClick={persistSettings}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-lime-300 px-4 py-3 text-xs font-bold uppercase tracking-widest text-black transition-all hover:bg-lime-200 active:scale-95"
+                >
+                  <Save className="h-4 w-4" /> Save
+                </button>
               </div>
             </div>
           </motion.div>
