@@ -1737,14 +1737,19 @@ function BeatriceAgent({
     const clean = text.trim();
     if (!clean) return;
 
+    const newMsg: ChatMessage = {
+      role,
+      text: clean,
+      timestamp: Date.now(),
+      ...extra,
+    };
+
+    // Update local state immediately for instant UI feedback
+    setHistoryMsgs(prev => [...prev, newMsg]);
+
     try {
       const msgRef = push(ref(rtdb, 'users/' + user.uid + '/messages'));
-      set(msgRef, {
-        role,
-        text: clean,
-        timestamp: Date.now(),
-        ...extra,
-      });
+      set(msgRef, newMsg);
     } catch (e) {
       console.error(e);
     }
@@ -2842,6 +2847,8 @@ CONTEXT AND OVERRIDES
           `For documents, contracts, reports, and business materials: use CEO-quality, executive-grade templates with professional typography, clean layouts, and corporate polish suitable for Meneer Jo's business. Include proper letterheads, professional spacing, elegant fonts, and signature blocks where appropriate.`,
           `CRITICAL: When creating documents via render_web_artifact, DO NOT mention HTML, code, or technical implementation to the user. Simply say you are creating the document professionally. For example: "I'll prepare that document for you" or "Let me create that contract" or "I'll draft that for you now." The technical method is invisible to the boss.`,
           `For HTML/CSS/JS artifacts, include all CSS in <style> and all JS in <script>. Make it directly openable. For slides, include navigation controls and keyboard support. For documents, include print CSS and a print button. For Three.js, load Three.js from a CDN and keep everything in one HTML file.`,
+          `When the user shares an image or photo via upload or camera, describe what you see normally and briefly, then respond to anything relevant in it. Do not say you cannot see it - the image IS visible to you through the video channel. When the user shares a video, acknowledge it and refer to the chat preview.`,
+          `IMPORTANT: When you receive an image through the video channel along with a text message, respond ONLY ONCE with a combined answer that addresses both the text and what you see in the image. Do not generate separate responses for text and image.`,
         ].filter(Boolean).join('\n\n');
 
         const session = await aiRef.current.live.connect({
@@ -3342,40 +3349,51 @@ CONTEXT AND OVERRIDES
         }
 
         if (isImage) {
-          // For images, also send to live agent for immediate analysis
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-            const img = new Image();
-            img.onload = () => {
-              const canvas = document.createElement('canvas');
-              const maxDim = 1280;
-              let width = img.width;
-              let height = img.height;
-              if (width > maxDim || height > maxDim) {
-                if (width > height) {
-                  height = Math.round((height * maxDim) / width);
-                  width = maxDim;
-                } else {
-                  width = Math.round((width * maxDim) / height);
-                  height = maxDim;
+          // For images, send to live agent for immediate analysis
+          // Wait for session to be fully ready, then send image with context
+          setTimeout(() => {
+            if (!sessionRef.current) return;
+            
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const maxDim = 1280;
+                let width = img.width;
+                let height = img.height;
+                if (width > maxDim || height > maxDim) {
+                  if (width > height) {
+                    height = Math.round((height * maxDim) / width);
+                    width = maxDim;
+                  } else {
+                    width = Math.round((width * maxDim) / height);
+                    height = maxDim;
+                  }
                 }
-              }
-              canvas.width = width;
-              canvas.height = height;
-              const ctx = canvas.getContext('2d');
-              if (!ctx) return;
-              ctx.drawImage(img, 0, 0, width, height);
-              const base64Data = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-              
-              sendTextToLive(`${settings.userName} shared an image: "${safeName}". Preview available in chat. Look at it, describe what you see normally and briefly.`);
-              setTimeout(() => sendImageToLive(base64Data, fileType), 100);
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+                ctx.drawImage(img, 0, 0, width, height);
+                const base64Data = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+                
+                // Send ONE combined message with context then image immediately after
+                sendTextToLive(`${settings.userName} shared an image: "${safeName}". Describe what you see.`);
+                // Send image immediately - Gemini Live handles both in one turn
+                setTimeout(() => sendImageToLive(base64Data, fileType), 50);
+              };
+              img.src = ev.target?.result as string;
             };
-            img.src = ev.target?.result as string;
-          };
-          reader.readAsDataURL(file);
+            reader.readAsDataURL(file);
+          }, 500); // Wait for session fully ready
         } else {
-          // For videos
-          sendTextToLive(`${settings.userName} shared a video: "${safeName}". Video preview is available in the chat. Acknowledge it normally.`);
+          // For videos - just text notification, video content in chat preview
+          setTimeout(() => {
+            if (sessionRef.current) {
+              sendTextToLive(`${settings.userName} shared a video: "${safeName}". Check the chat preview.`);
+            }
+          }, 500);
         }
       } catch (err) {
         console.error('Cloudinary upload failed:', err);
