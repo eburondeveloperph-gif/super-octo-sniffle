@@ -3534,6 +3534,7 @@ CONTEXT AND OVERRIDES
       <input
         ref={fileInputRef}
         type="file"
+        aria-label="Attach file"
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
@@ -3607,7 +3608,7 @@ CONTEXT AND OVERRIDES
 
       <header className={`z-50 flex items-center justify-between border-b border-white/5 bg-[#050505]/80 px-8 py-6 backdrop-blur-md ${isVideoEnabled ? 'pointer-events-none opacity-0' : ''}`}>
         <div className="flex items-center gap-4">
-          <button onClick={() => setShowSidebar(true)} className="-ml-2 rounded-xl border border-white/10 p-2 text-zinc-400 transition-all hover:bg-white/5 hover:text-white">
+          <button onClick={() => setShowSidebar(true)} aria-label="Open menu" className="-ml-2 rounded-xl border border-white/10 p-2 text-zinc-400 transition-all hover:bg-white/5 hover:text-white">
             <Menu className="h-5 w-5" />
           </button>
           <div className="hidden items-center gap-3 sm:flex">
@@ -3726,6 +3727,7 @@ CONTEXT AND OVERRIDES
                         href={task.htmlPreviewData}
                         target="_blank"
                         rel="noreferrer"
+                        aria-label="Open preview"
                         className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"
                       >
                         <ExternalLink className="h-4 w-4" />
@@ -3736,6 +3738,7 @@ CONTEXT AND OVERRIDES
                       <a
                         href={task.downloadData}
                         download={task.downloadFilename}
+                        aria-label="Download file"
                         className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"
                       >
                         <Download className="h-4 w-4" />
@@ -3815,7 +3818,7 @@ CONTEXT AND OVERRIDES
                   <h2 className="text-sm font-bold uppercase tracking-widest text-white">Office History</h2>
                   <p className="mt-1 text-[10px] uppercase tracking-widest text-zinc-500">Saved conversation records</p>
                 </div>
-                <button onClick={() => setShowSidebar(false)} className="-mr-2 rounded-xl p-2 text-zinc-500 transition-colors hover:bg-white/5 hover:text-white">
+                <button onClick={() => setShowSidebar(false)} aria-label="Close sidebar" className="-mr-2 rounded-xl p-2 text-zinc-500 transition-colors hover:bg-white/5 hover:text-white">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -4026,6 +4029,7 @@ CONTEXT AND OVERRIDES
                     <button
                       type="submit"
                       disabled={!chatInput.trim()}
+                      aria-label="Send message"
                       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-lime-300 text-black transition hover:bg-lime-200 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <Send className="h-4 w-4" />
@@ -4047,7 +4051,7 @@ CONTEXT AND OVERRIDES
             <div className="sticky top-0 z-10 mx-auto flex w-full max-w-2xl items-center justify-between border-b border-white/10 bg-[#050505]/80 p-6 backdrop-blur-xl">
               <h2 className="text-sm font-bold uppercase tracking-widest text-white">Office Profile</h2>
 
-              <button onClick={() => setShowProfile(false)} className="rounded-xl bg-white/5 p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white">
+              <button onClick={() => setShowProfile(false)} aria-label="Close profile" className="rounded-xl bg-white/5 p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -4066,6 +4070,7 @@ CONTEXT AND OVERRIDES
                   <input
                     type="file"
                     accept="image/*"
+                    aria-label="Upload avatar"
                     className="absolute inset-0 cursor-pointer opacity-0"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
@@ -4136,6 +4141,7 @@ CONTEXT AND OVERRIDES
                   <select
                     value={settings.selectedVoice}
                     onChange={(e) => setSettings(s => ({ ...s, selectedVoice: e.target.value }))}
+                    aria-label="Voice alias"
                     className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-sm text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
                   >
                     {GEMINI_LIVE_VOICE_OPTIONS.map(v => (
