@@ -56,13 +56,14 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
+// ==================== Types & Constants ====================
+
 interface ChatMessage {
   role: 'user' | 'model';
   text: string;
   timestamp: number;
   fileName?: string;
   fileType?: string;
-  previewData?: string;
   toolName?: string;
   toolResult?: any;
   downloadData?: string;
@@ -96,7 +97,7 @@ const EBURON_LOGO_URL = 'https://eburon.ai/icon-eburon.svg';
 const PRODUCT_BRAND = 'VEP';
 const PRODUCT_FULL_NAME = 'Virtual Employee Persona';
 
-const GEMINI_LIVE_VOICE_OPTIONS =[
+const GEMINI_LIVE_VOICE_OPTIONS = [
   { alias: 'Superman', id: 'Charon', vibe: 'deep, steady, grounded' },
   { alias: 'Wonder Woman', id: 'Kore', vibe: 'clear, composed, warm' },
   { alias: 'Batman', id: 'Fenrir', vibe: 'dark, firm, serious' },
@@ -191,18 +192,7 @@ const DEFAULT_SETTINGS: AgentSettings = {
   selectedVoice: 'Kore',
 };
 
-const GOOGLE_SERVICE_TOOLS =[
-  {
-    name: 'url_fetch',
-    description: 'Fetch the text content of a URL or web page.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        url: { type: Type.STRING, description: 'The URL to fetch.' }
-      },
-      required: ['url'],
-    },
-  },
+const GOOGLE_SERVICE_TOOLS = [
   {
     name: 'render_web_artifact',
     description:
@@ -253,7 +243,7 @@ const GOOGLE_SERVICE_TOOLS =[
         saveToDrive: { type: Type.BOOLEAN, description: 'If true, upload the HTML document to the user drive.' },
         emailTo: { type: Type.STRING, description: 'Optional email address to send the HTML document to. Use current_user if requested.' },
       },
-      required:['title', 'html'],
+      required: ['title', 'html'],
     },
   },
   {
@@ -266,7 +256,7 @@ const GOOGLE_SERVICE_TOOLS =[
         query: { type: Type.STRING, description: 'Mail search query, sender, subject, or keyword.' },
         limit: { type: Type.NUMBER, description: 'Maximum number of messages to fetch.' },
       },
-      required:[],
+      required: [],
     },
   },
   {
@@ -309,7 +299,7 @@ const GOOGLE_SERVICE_TOOLS =[
         timeMin: { type: Type.STRING, description: 'Optional start datetime.' },
         timeMax: { type: Type.STRING, description: 'Optional end datetime.' },
       },
-      required:[],
+      required: [],
     },
   },
   {
@@ -343,7 +333,7 @@ const GOOGLE_SERVICE_TOOLS =[
         location: { type: Type.STRING, description: 'New event location.' },
         description: { type: Type.STRING, description: 'New event description.' },
       },
-      required:[],
+      required: [],
     },
   },
   {
@@ -369,7 +359,7 @@ const GOOGLE_SERVICE_TOOLS =[
         fileName: { type: Type.STRING, description: 'File name or search term if id is unknown.' },
         exportMimeType: { type: Type.STRING, description: 'Optional export MIME type, e.g. application/pdf or text/plain.' },
       },
-      required:[],
+      required: [],
     },
   },
   {
@@ -424,7 +414,7 @@ const GOOGLE_SERVICE_TOOLS =[
         range: { type: Type.STRING, description: 'Sheet range, for example Sheet1!A1:D10.' },
         query: { type: Type.STRING, description: 'File name or search query if id unknown.' },
       },
-      required:[],
+      required: [],
     },
   },
   {
@@ -460,7 +450,7 @@ const GOOGLE_SERVICE_TOOLS =[
       properties: {
         listId: { type: Type.STRING, description: 'Optional task list id, defaults to @default.' },
       },
-      required:[],
+      required: [],
     },
   },
   {
@@ -567,24 +557,22 @@ const GOOGLE_SERVICE_TOOLS =[
         terms: { type: Type.STRING, description: 'Important terms, scope, payment, obligations, duration, termination, confidentiality, etc.' },
         emailTo: { type: Type.STRING, description: 'Optional email address to send PDF to. Use current_user if requested.' },
       },
-      required:['title', 'contractType', 'partyA', 'partyB', 'terms'],
+      required: ['title', 'contractType', 'partyA', 'partyB', 'terms'],
     },
   },
 ];
 
+// ==================== Helper Functions ====================
+
 function safeJsonStringify(value: any) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
+  try { return JSON.stringify(value, null, 2); }
+  catch { return String(value); }
 }
 
 function makeDownloadFile(result: any, filenameBase: string, mime = 'application/json') {
   const body = mime === 'application/json' ? safeJsonStringify(result) : String(result);
   const data = `data:${mime};charset=utf-8,${encodeURIComponent(body)}`;
   const safe = filenameBase.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'tool-result';
-
   return {
     downloadData: data,
     downloadFilename: `${safe}-${Date.now()}${mime === 'application/json' ? '.json' : '.txt'}`,
@@ -593,58 +581,18 @@ function makeDownloadFile(result: any, filenameBase: string, mime = 'application
 
 function normalizeHtml(html: string) {
   const trimmed = String(html || '').trim();
-
   if (!trimmed) {
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Generated Artifact</title>
-<style>
-body{font-family:Arial,sans-serif;background:#111;color:#fff;display:grid;place-items:center;min-height:100vh;margin:0}
-.card{max-width:720px;padding:32px;border:1px solid rgba(255,255,255,.15);border-radius:24px;background:rgba(255,255,255,.06)}
-</style>
-</head>
-<body>
-<div class="card">
-<h1>Empty Artifact</h1>
-<p>No HTML was provided.</p>
-</div>
-</body>
-</html>`;
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Generated Artifact</title><style>body{font-family:Arial,sans-serif;background:#111;color:#fff;display:grid;place-items:center;min-height:100vh;margin:0}.card{max-width:720px;padding:32px;border:1px solid rgba(255,255,255,.15);border-radius:24px;background:rgba(255,255,255,.06)}</style></head><body><div class="card"><h1>Empty Artifact</h1><p>No HTML was provided.</p></div></body></html>`;
   }
-
   if (trimmed.toLowerCase().startsWith('<!doctype html')) return trimmed;
-
-  if (trimmed.toLowerCase().startsWith('<html')) {
-    return `<!DOCTYPE html>\n${trimmed}`;
-  }
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Generated Artifact</title>
-</head>
-<body>
-${trimmed}
-</body>
-</html>`;
+  if (trimmed.toLowerCase().startsWith('<html')) return `<!DOCTYPE html>\n${trimmed}`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Generated Artifact</title></head><body>${trimmed}</body></html>`;
 }
 
 function makeHtmlArtifactFile(html: string, filenameBase: string) {
-  const safe =
-    String(filenameBase || 'artifact')
-      .toLowerCase()
-      .replace(/\.html$/i, '')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '') || 'artifact';
-
+  const safe = String(filenameBase || 'artifact').toLowerCase().replace(/\.html$/i, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'artifact';
   const finalHtml = normalizeHtml(html);
   const data = `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}`;
-
   return {
     html: finalHtml,
     htmlPreviewData: data,
@@ -657,7 +605,6 @@ function makeHtmlArtifactFile(html: string, filenameBase: string) {
 function makeBlobDownloadData(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = reject;
     reader.readAsDataURL(blob);
@@ -666,63 +613,30 @@ function makeBlobDownloadData(blob: Blob): Promise<string> {
 
 function base64UrlEncode(value: string) {
   return btoa(unescape(encodeURIComponent(value)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
-
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
 
-function buildEmailRaw({
-  to,
-  subject,
-  body,
-  cc,
-  bcc,
-  attachment,
-}: {
-  to: string;
-  subject: string;
-  body: string;
-  cc?: string;
-  bcc?: string;
-  attachment?: {
-    filename: string;
-    mimeType: string;
-    base64Content: string;
-  };
-}) {
-  const headers =[
+function buildEmailRaw({ to, subject, body, cc, bcc, attachment }: { to: string; subject: string; body: string; cc?: string; bcc?: string; attachment?: { filename: string; mimeType: string; base64Content: string } }) {
+  const headers = [
     `To: ${to}`,
     cc ? `Cc: ${cc}` : '',
     bcc ? `Bcc: ${bcc}` : '',
     `Subject: ${subject}`,
     'MIME-Version: 1.0',
   ].filter(Boolean);
-
   if (!attachment) {
-    const raw =[
-      ...headers,
-      'Content-Type: text/plain; charset="UTF-8"',
-      '',
-      body,
-    ].join('\r\n');
-
+    const raw = [...headers, 'Content-Type: text/plain; charset="UTF-8"', '', body].join('\r\n');
     return base64UrlEncode(raw);
   }
-
   const boundary = `boundary_${Date.now()}`;
-
-  const raw =[
+  const raw = [
     ...headers,
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     '',
@@ -740,41 +654,20 @@ function buildEmailRaw({
     '',
     `--${boundary}--`,
   ].join('\r\n');
-
   return base64UrlEncode(raw);
 }
 
 function readableDateRange(date?: string, timeMin?: string, timeMax?: string) {
   const now = new Date();
-
-  if (timeMin && timeMax) {
-    return { timeMin, timeMax };
-  }
-
+  if (timeMin && timeMax) return { timeMin, timeMax };
   const target = date ? new Date(date) : now;
-  const start = new Date(target);
-  start.setHours(0, 0, 0, 0);
-
-  const end = new Date(target);
-  end.setHours(23, 59, 59, 999);
-
-  return {
-    timeMin: start.toISOString(),
-    timeMax: end.toISOString(),
-  };
+  const start = new Date(target); start.setHours(0,0,0,0);
+  const end = new Date(target); end.setHours(23,59,59,999);
+  return { timeMin: start.toISOString(), timeMax: end.toISOString() };
 }
 
-function buildContractText({
-  title,
-  contractType,
-  partyA,
-  partyB,
-  effectiveDate,
-  jurisdiction,
-  terms,
-}: any) {
+function buildContractText({ title, contractType, partyA, partyB, effectiveDate, jurisdiction, terms }: any) {
   const today = new Date().toLocaleDateString();
-
   return `${title || 'Contract Agreement'}
 
 Type of Agreement:
@@ -834,341 +727,86 @@ Note:
 This draft is generated for convenience and should be reviewed by a qualified legal professional before signing.`;
 }
 
-function OneLineStreamingTranscript({
-  text,
-  role,
-  name,
-}: {
-  text: string;
-  role: 'user' | 'model';
-  name: string;
-}) {
-  return (
-    <motion.div
-      key={`${role}-${text}`}
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -6 }}
-      transition={{ duration: 0.12 }}
-      className="w-full overflow-hidden px-4"
-      style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}
-    >
-      <div className="mx-auto flex max-w-6xl items-center justify-center gap-3 overflow-hidden whitespace-nowrap rounded-full border border-lime-300/15 bg-black/35 px-5 py-3 shadow-2xl backdrop-blur-2xl">
-        <span
-          className={`shrink-0 rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-[0.22em] ${
-            role === 'user'
-              ? 'border border-sky-400/20 bg-sky-500/10 text-sky-300'
-              : 'border border-lime-300/25 bg-lime-400/10 text-lime-300'
-          }`}
-        >
-          {role === 'user' ? 'You' : name}
-        </span>
+// ==================== UI Components (unchanged) ====================
 
+function OneLineStreamingTranscript({ text, role, name }: { text: string; role: 'user' | 'model'; name: string }) {
+  return (
+    <motion.div key={`${role}-${text}`} initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-6 }} transition={{ duration:0.12 }} className="w-full overflow-hidden px-4" style={{ fontFamily:'Roboto, system-ui, sans-serif' }}>
+      <div className="mx-auto flex max-w-6xl items-center justify-center gap-3 overflow-hidden whitespace-nowrap rounded-full border border-lime-300/15 bg-black/35 px-5 py-3 shadow-2xl backdrop-blur-2xl">
+        <span className={`shrink-0 rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-[0.22em] ${role==='user'?'border border-sky-400/20 bg-sky-500/10 text-sky-300':'border border-lime-300/25 bg-lime-400/10 text-lime-300'}`}>{role==='user'?'You':name}</span>
         <div className="min-w-0 flex-1 overflow-hidden">
-          <p className={`truncate text-left text-lg font-medium leading-none tracking-tight md:text-2xl ${
-            role === 'user' ? 'text-sky-100' : 'text-lime-50'
-          }`}>
-            {text}
-          </p>
+          <p className={`truncate text-left text-lg font-medium leading-none tracking-tight md:text-2xl ${role==='user'?'text-sky-100':'text-lime-50'}`}>{text}</p>
         </div>
       </div>
     </motion.div>
   );
 }
 
-function LimeVoiceOrb({
-  isActive,
-  isAgentSpeaking,
-  speakerLevel,
-  speakerBands,
-}: {
-  isActive: boolean;
-  isAgentSpeaking: boolean;
-  speakerLevel: number;
-  speakerBands: number[];
-}) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+function LimeVoiceOrb({ isActive, isAgentSpeaking, speakerLevel, speakerBands }: { isActive:boolean; isAgentSpeaking:boolean; speakerLevel:number; speakerBands:number[] }) {
+  const canvasRef = useRef<HTMLCanvasElement|null>(null);
   const levelRef = useRef(0);
   const bandsRef = useRef<number[]>(Array(20).fill(0));
   const activeRef = useRef(false);
   const speakingRef = useRef(false);
-
+  useEffect(() => { levelRef.current = speakerLevel; bandsRef.current = speakerBands; activeRef.current = isActive; speakingRef.current = isAgentSpeaking; }, [isActive, isAgentSpeaking, speakerBands, speakerLevel]);
   useEffect(() => {
-    levelRef.current = speakerLevel;
-    bandsRef.current = speakerBands;
-    activeRef.current = isActive;
-    speakingRef.current = isAgentSpeaking;
-  },[isActive, isAgentSpeaking, speakerBands, speakerLevel]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
-
-    let frame = 0;
-    let raf = 0;
-    let displayLevel = 0;
-
-    const fitCanvas = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
-      const height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
-
-      if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width;
-        canvas.height = height;
-      }
-
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      return {
-        width: width / dpr,
-        height: height / dpr,
-      };
-    };
-
-    const makeOrbPath = (cx: number, cy: number, radius: number, pulse: number, time: number) => {
-      const path = new Path2D();
-      const points: Array<{ x: number; y: number }> =[];
-      const bands = bandsRef.current.length ? bandsRef.current : Array(20).fill(0);
-      const live = activeRef.current && speakingRef.current;
-      const count = 112;
-
-      for (let i = 0; i < count; i++) {
-        const angle = (Math.PI * 2 * i) / count;
-        const band = bands[i % bands.length] || 0;
-        const surface =
-          Math.sin(angle * 2.1 + time * 0.95) * (live ? 2.5 : 0.9) +
-          Math.sin(angle * 3.7 - time * 0.68) * (live ? 1.7 : 0.55) +
-          band * (live ? 8.5 : 1.8);
-        const r = radius + pulse * 8 + surface;
-
-        points.push({
-          x: cx + Math.cos(angle) * r,
-          y: cy + Math.sin(angle) * r,
-        });
-      }
-
-      points.forEach((point, index) => {
-        const next = points[(index + 1) % points.length];
-        const midX = (point.x + next.x) / 2;
-        const midY = (point.y + next.y) / 2;
-
-        if (index === 0) {
-          path.moveTo(midX, midY);
-        } else {
-          path.quadraticCurveTo(point.x, point.y, midX, midY);
-        }
-      });
-
-      path.closePath();
-      return path;
-    };
-
-    const drawGlow = (cx: number, cy: number, radius: number, inner: string, outer: string) => {
-      const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-      gradient.addColorStop(0, inner);
-      gradient.addColorStop(1, outer);
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-      ctx.fill();
-    };
-
-    const draw = () => {
-      const { width, height } = fitCanvas();
-      const cx = width / 2;
-      const cy = height / 2;
-      const time = frame / 60;
-      const rawLevel = activeRef.current ? Math.max(levelRef.current, speakingRef.current ? 0.035 : 0) : 0;
-      displayLevel += (rawLevel - displayLevel) * 0.16;
-      const bands = bandsRef.current.length ? bandsRef.current : Array(20).fill(0);
-      const bandEnergy = bands.reduce((sum, band) => sum + band, 0) / Math.max(bands.length, 1);
-      const pulse = Math.min(1, Math.max(displayLevel, bandEnergy * 1.25));
-      const live = activeRef.current && speakingRef.current;
-      const baseRadius = 93;
-
-      ctx.clearRect(0, 0, width, height);
-
-      ctx.save();
-      ctx.globalAlpha = activeRef.current ? 0.42 + pulse * 0.28 : 0.24;
-      ctx.filter = 'blur(34px)';
-      drawGlow(cx, cy, 118 + pulse * 22, 'rgba(190,242,100,0.42)', 'rgba(22,101,52,0)');
-      ctx.restore();
-
-      ctx.save();
-      ctx.globalAlpha = activeRef.current ? 0.24 + pulse * 0.26 : 0.12;
-      ctx.strokeStyle = 'rgba(190,242,100,0.34)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 116 + pulse * 16, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      const orbPath = makeOrbPath(cx, cy, baseRadius, pulse, time);
-
-      ctx.save();
-      ctx.shadowColor = 'rgba(190,242,100,0.38)';
-      ctx.shadowBlur = 38 + pulse * 28;
-      const bodyGradient = ctx.createRadialGradient(cx - 38, cy - 48, 8, cx, cy, 126);
-      bodyGradient.addColorStop(0, 'rgba(236,252,203,0.76)');
-      bodyGradient.addColorStop(0.27, 'rgba(163,230,53,0.58)');
-      bodyGradient.addColorStop(0.58, 'rgba(34,197,94,0.46)');
-      bodyGradient.addColorStop(1, 'rgba(5,46,22,0.96)');
-      ctx.fillStyle = bodyGradient;
-      ctx.fill(orbPath);
-      ctx.restore();
-
-      ctx.save();
-      ctx.clip(orbPath);
-      ctx.globalCompositeOperation = 'screen';
-      drawGlow(
-        cx - 38 + Math.sin(time * 0.7) * 12,
-        cy - 34 + Math.cos(time * 0.55) * 10,
-        78 + pulse * 12,
-        'rgba(236,252,203,0.52)',
-        'rgba(236,252,203,0)'
-      );
-      drawGlow(
-        cx + 40 + Math.cos(time * 0.62) * 14,
-        cy + 24 + Math.sin(time * 0.75) * 12,
-        90 + pulse * 18,
-        'rgba(16,185,129,0.44)',
-        'rgba(16,185,129,0)'
-      );
-      drawGlow(
-        cx - 6 + Math.sin(time * 0.5) * 18,
-        cy + 34 + Math.cos(time * 0.46) * 10,
-        98,
-        'rgba(132,204,22,0.22)',
-        'rgba(132,204,22,0)'
-      );
-      ctx.restore();
-
-      ctx.save();
-      ctx.strokeStyle = `rgba(217,249,157,${0.16 + pulse * 0.26})`;
-      ctx.lineWidth = 1.4;
-      ctx.stroke(orbPath);
-      ctx.restore();
-
-      ctx.save();
-      ctx.globalAlpha = live ? 0.14 + pulse * 0.18 : 0.06;
-      ctx.fillStyle = 'rgba(255,255,255,0.58)';
-      ctx.beginPath();
-      ctx.ellipse(cx - 36, cy - 46, 24 + pulse * 6, 11 + pulse * 3, -0.55, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      frame += 1;
-      raf = requestAnimationFrame(draw);
-    };
-
-    raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
-  },[]);
-
-  return (
-    <div className="relative flex h-72 w-72 items-center justify-center">
-      <canvas ref={canvasRef} className="h-full w-full" aria-hidden="true" />
-    </div>
-  );
+    const canvas = canvasRef.current; const ctx = canvas?.getContext('2d'); if(!canvas||!ctx) return;
+    let frame=0, raf=0, displayLevel=0;
+    const fitCanvas = () => { const dpr = Math.min(window.devicePixelRatio||1,2); const width = Math.max(1,Math.floor(canvas.clientWidth*dpr)); const height = Math.max(1,Math.floor(canvas.clientHeight*dpr)); if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;} ctx.setTransform(dpr,0,0,dpr,0,0); return {width:width/dpr, height:height/dpr}; };
+    const makeOrbPath = (cx:number,cy:number,radius:number,pulse:number,time:number) => { const path=new Path2D(); const points:Array<{x:number;y:number}>=[]; const bands = bandsRef.current.length ? bandsRef.current : Array(20).fill(0); const live = activeRef.current && speakingRef.current; const count=112; for(let i=0;i<count;i++){ const angle = (Math.PI*2*i)/count; const band = bands[i%bands.length]||0; const surface = Math.sin(angle*2.1+time*0.95)*(live?2.5:0.9)+Math.sin(angle*3.7-time*0.68)*(live?1.7:0.55)+band*(live?8.5:1.8); const r = radius + pulse*8 + surface; points.push({x:cx+Math.cos(angle)*r, y:cy+Math.sin(angle)*r}); } points.forEach((point,index)=>{ const next=points[(index+1)%points.length]; const midX=(point.x+next.x)/2, midY=(point.y+next.y)/2; if(index===0) path.moveTo(midX,midY); else path.quadraticCurveTo(point.x,point.y,midX,midY); }); path.closePath(); return path; };
+    const drawGlow = (cx:number,cy:number,radius:number,inner:string,outer:string) => { const gradient=ctx.createRadialGradient(cx,cy,0,cx,cy,radius); gradient.addColorStop(0,inner); gradient.addColorStop(1,outer); ctx.fillStyle=gradient; ctx.beginPath(); ctx.arc(cx,cy,radius,0,Math.PI*2); ctx.fill(); };
+    const draw = () => { const {width,height}=fitCanvas(); const cx=width/2,cy=height/2, time=frame/60; const rawLevel = activeRef.current ? Math.max(levelRef.current, speakingRef.current?0.035:0) : 0; displayLevel+= (rawLevel-displayLevel)*0.16; const bands = bandsRef.current.length ? bandsRef.current : Array(20).fill(0); const bandEnergy = bands.reduce((s,b)=>s+b,0)/Math.max(bands.length,1); const pulse = Math.min(1, Math.max(displayLevel, bandEnergy*1.25)); const live = activeRef.current&&speakingRef.current; const baseRadius=93;
+      ctx.clearRect(0,0,width,height); ctx.save(); ctx.globalAlpha=activeRef.current?0.42+pulse*0.28:0.24; ctx.filter='blur(34px)'; drawGlow(cx,cy,118+pulse*22,'rgba(190,242,100,0.42)','rgba(22,101,52,0)'); ctx.restore();
+      ctx.save(); ctx.globalAlpha=activeRef.current?0.24+pulse*0.26:0.12; ctx.strokeStyle='rgba(190,242,100,0.34)'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(cx,cy,116+pulse*16,0,Math.PI*2); ctx.stroke(); ctx.restore();
+      const orbPath=makeOrbPath(cx,cy,baseRadius,pulse,time); ctx.save(); ctx.shadowColor='rgba(190,242,100,0.38)'; ctx.shadowBlur=38+pulse*28; const bodyGradient = ctx.createRadialGradient(cx-38,cy-48,8,cx,cy,126); bodyGradient.addColorStop(0,'rgba(236,252,203,0.76)'); bodyGradient.addColorStop(0.27,'rgba(163,230,53,0.58)'); bodyGradient.addColorStop(0.58,'rgba(34,197,94,0.46)'); bodyGradient.addColorStop(1,'rgba(5,46,22,0.96)'); ctx.fillStyle=bodyGradient; ctx.fill(orbPath); ctx.restore();
+      ctx.save(); ctx.clip(orbPath); ctx.globalCompositeOperation='screen'; drawGlow(cx-38+Math.sin(time*0.7)*12,cy-34+Math.cos(time*0.55)*10,78+pulse*12,'rgba(236,252,203,0.52)','rgba(236,252,203,0)'); drawGlow(cx+40+Math.cos(time*0.62)*14,cy+24+Math.sin(time*0.75)*12,90+pulse*18,'rgba(16,185,129,0.44)','rgba(16,185,129,0)'); drawGlow(cx-6+Math.sin(time*0.5)*18,cy+34+Math.cos(time*0.46)*10,98,'rgba(132,204,22,0.22)','rgba(132,204,22,0)'); ctx.restore();
+      ctx.save(); ctx.strokeStyle=`rgba(217,249,157,${0.16+pulse*0.26})`; ctx.lineWidth=1.4; ctx.stroke(orbPath); ctx.restore();
+      ctx.save(); ctx.globalAlpha=live?0.14+pulse*0.18:0.06; ctx.fillStyle='rgba(255,255,255,0.58)'; ctx.beginPath(); ctx.ellipse(cx-36,cy-46,24+pulse*6,11+pulse*3,-0.55,0,Math.PI*2); ctx.fill(); ctx.restore();
+      frame+=1; raf=requestAnimationFrame(draw); };
+    raf=requestAnimationFrame(draw); return ()=>cancelAnimationFrame(raf);
+  }, []);
+  return <div className="relative flex h-72 w-72 items-center justify-center"><canvas ref={canvasRef} className="h-full w-full" aria-hidden="true" /></div>;
 }
 
-function StartIconMicVisualizer({
-  isActive,
-  connecting,
-  isMuted,
-  micLevel,
-  micBands,
-  onClick,
-}: {
-  isActive: boolean;
-  connecting: boolean;
-  isMuted: boolean;
-  micLevel: number;
-  micBands?: number[];
-  onClick: () => void;
-}) {
-  const innerBands = micBands?.length
-    ? micBands.slice(5, 14)
-    :[0.35, 0.5, 0.72, 0.9, 1, 0.82, 0.64, 0.46, 0.32].map(n => n * micLevel);
-
+function StartIconMicVisualizer({ isActive, connecting, isMuted, micLevel, micBands, onClick }: { isActive:boolean; connecting:boolean; isMuted:boolean; micLevel:number; micBands?:number[]; onClick:()=>void }) {
+  const innerBands = micBands?.length ? micBands.slice(5,14) : [0.35,0.5,0.72,0.9,1,0.82,0.64,0.46,0.32].map(n=>n*micLevel);
   return (
-    <button
-      onClick={onClick}
-      disabled={connecting}
-      aria-label={isActive ? 'Stop voice session' : 'Start voice session'}
-      className="group relative flex h-20 w-20 items-center justify-center"
-    >
-      <motion.div
-        animate={{
-          opacity: isActive ? 0.16 + micLevel * 0.3 : 0.08,
-        }}
-        transition={{ duration: 0.045 }}
-        className={`absolute inset-0 rounded-full ${
-          isMuted ? 'bg-red-500/20' : 'bg-lime-300/30'
-        }`}
-      />
-
-      <div
-        className={`relative flex h-20 w-20 items-center justify-center rounded-full border bg-[#0A0A0B] shadow-2xl transition-all ${
-          isActive
-            ? isMuted
-              ? 'border-red-500/35'
-              : 'border-lime-300/60'
-            : 'border-white/10 group-hover:border-lime-300/50'
-        }`}
-      >
-        {connecting ? (
-          <Loader2 className="h-7 w-7 animate-spin text-lime-300" />
-        ) : isActive ? (
+    <button onClick={onClick} disabled={connecting} aria-label={isActive?'Stop voice session':'Start voice session'} className="group relative flex h-20 w-20 items-center justify-center">
+      <motion.div animate={{ opacity: isActive ? 0.16+micLevel*0.3 : 0.08 }} transition={{ duration:0.045 }} className={`absolute inset-0 rounded-full ${isMuted?'bg-red-500/20':'bg-lime-300/30'}`} />
+      <div className={`relative flex h-20 w-20 items-center justify-center rounded-full border bg-[#0A0A0B] shadow-2xl transition-all ${isActive? isMuted?'border-red-500/35':'border-lime-300/60' : 'border-white/10 group-hover:border-lime-300/50'}`}>
+        {connecting ? <Loader2 className="h-7 w-7 animate-spin text-lime-300" /> : isActive ? (
           <div className="absolute inset-0 flex items-center justify-center overflow-hidden rounded-full">
             <div className="flex h-12 items-center gap-1">
-              {innerBands.map((band, i) => {
-                const liveBand = isMuted ? 0 : Math.max(band, micLevel * 0.4);
-
-                return (
-                  <motion.div
-                    key={i}
-                    animate={{
-                      height: Math.max(5, liveBand * 42),
-                      opacity: isMuted ? 0.2 : Math.max(0.32, liveBand + 0.18),
-                    }}
-                    transition={{ duration: 0.035 }}
-                    className={`w-1 rounded-full ${
-                      isMuted
-                        ? 'bg-red-500'
-                        : 'bg-lime-300 shadow-[0_0_10px_rgba(190,242,100,0.75)]'
-                    }`}
-                  />
-                );
+              {innerBands.map((band,i)=>{
+                const liveBand = isMuted?0:Math.max(band, micLevel*0.4);
+                return <motion.div key={i} animate={{ height:Math.max(5,liveBand*42), opacity:isMuted?0.2:Math.max(0.32,liveBand+0.18) }} transition={{ duration:0.035 }} className={`w-1 rounded-full ${isMuted?'bg-red-500':'bg-lime-300 shadow-[0_0_10px_rgba(190,242,100,0.75)]'}`} />;
               })}
             </div>
           </div>
-        ) : (
-          <Power className="h-8 w-8 text-lime-300 transition-colors" />
-        )}
+        ) : <Power className="h-8 w-8 text-lime-300 transition-colors" />}
       </div>
     </button>
   );
 }
 
+// ==================== Main App (auth) ====================
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<AgentSettings>(DEFAULT_SETTINGS);
-  const[authMode, setAuthMode] = useState<'signin' | 'signup' | 'reset'>('signin');
+  const [authMode, setAuthMode] = useState<'signin'|'signup'|'reset'>('signin');
   const [authName, setAuthName] = useState('');
   const [authEmail, setAuthEmail] = useState('');
-  const[authPassword, setAuthPassword] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
   const [authConfirmPassword, setAuthConfirmPassword] = useState('');
-  const[authBusy, setAuthBusy] = useState(false);
-  const [authMessage, setAuthMessage] = useState<{ type: 'error' | 'success' | 'info'; text: string } | null>(null);
-  const[showAuthPassword, setShowAuthPassword] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authMessage, setAuthMessage] = useState<{type:'error'|'success'|'info';text:string}|null>(null);
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [showAuthConfirmPassword, setShowAuthConfirmPassword] = useState(false);
 
   useEffect(() => {
     const fontId = 'beatrice-roboto-font';
-
     if (!document.getElementById(fontId)) {
       const link = document.createElement('link');
       link.id = fontId;
@@ -1176,12 +814,11 @@ export default function App() {
       link.href = 'https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap';
       document.head.appendChild(link);
     }
-  },[]);
+  }, []);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
-
       if (u) {
         try {
           const userRef = ref(rtdb, 'users/' + u.uid);
@@ -1189,13 +826,8 @@ export default function App() {
           const providerIds = u.providerData.map(provider => provider.providerId);
           const authProvider = providerIds.includes('google.com') ? 'google' : 'email';
           const hasGoogleServices = authProvider === 'google' && Boolean(localStorage.getItem('googleAccessToken'));
-
           if (!userSnap.exists()) {
-            const initialSettings = {
-              ...DEFAULT_SETTINGS,
-              userName: u.displayName || DEFAULT_SETTINGS.userName,
-            };
-
+            const initialSettings = { ...DEFAULT_SETTINGS, userName: u.displayName || DEFAULT_SETTINGS.userName };
             await set(userRef, {
               displayName: initialSettings.userName,
               email: u.email || '',
@@ -1205,18 +837,10 @@ export default function App() {
               updatedAt: serverTimestamp(),
               settings: initialSettings,
             });
-
             setSettings(initialSettings);
           } else {
             const data = userSnap.val();
-
-            if (data.settings) {
-              setSettings({
-                ...DEFAULT_SETTINGS,
-                ...data.settings,
-              });
-            }
-
+            if (data.settings) setSettings({ ...DEFAULT_SETTINGS, ...data.settings });
             await update(userRef, {
               email: u.email || data.email || '',
               authProvider,
@@ -1224,20 +848,15 @@ export default function App() {
               updatedAt: serverTimestamp(),
             });
           }
-        } catch (error) {
-          handleDatabaseError(error, OperationType.CREATE, 'users');
-        }
+        } catch (error) { handleDatabaseError(error, OperationType.CREATE, 'users'); }
       }
-
       setLoading(false);
     });
-
     return () => unsub();
-  },[]);
+  }, []);
 
   const getAuthErrorMessage = (error: any) => {
     const code = String(error?.code || '');
-
     if (code.includes('auth/email-already-in-use')) return 'That email is already registered. Sign in instead.';
     if (code.includes('auth/invalid-email')) return 'Enter a valid email address.';
     if (code.includes('auth/user-not-found') || code.includes('auth/wrong-password') || code.includes('auth/invalid-credential')) return 'Email or password is incorrect.';
@@ -1248,16 +867,10 @@ export default function App() {
   };
 
   const handleGoogleLogin = async () => {
-    setAuthBusy(true);
-    setAuthMessage(null);
-
+    setAuthBusy(true); setAuthMessage(null);
     try {
       const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({
-        prompt: 'consent select_account',
-        access_type: 'offline',
-      });
-
+      provider.setCustomParameters({ prompt: 'consent select_account', access_type: 'offline' });
       provider.addScope('https://www.googleapis.com/auth/gmail.modify');
       provider.addScope('https://www.googleapis.com/auth/gmail.send');
       provider.addScope('https://www.googleapis.com/auth/gmail.compose');
@@ -1272,78 +885,49 @@ export default function App() {
       provider.addScope('https://www.googleapis.com/auth/forms.body');
       provider.addScope('https://www.googleapis.com/auth/chat.messages');
       provider.addScope('https://www.googleapis.com/auth/analytics.readonly');
-
       const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
       const credential = GoogleAuthProvider.credentialFromResult(result);
-
-      if (credential?.accessToken) {
-        localStorage.setItem('googleAccessToken', credential.accessToken);
-      }
+      if (credential?.accessToken) localStorage.setItem('googleAccessToken', credential.accessToken);
     } catch (error: any) {
       console.error(error);
-
       if (error && error.message && error.message.includes('missing initial state')) {
         setAuthMessage({ type: 'error', text: "Authentication failed due to browser privacy settings. Open the app in a new tab and try again." });
       } else {
         setAuthMessage({ type: 'error', text: getAuthErrorMessage(error) });
       }
-    } finally {
-      setAuthBusy(false);
-    }
+    } finally { setAuthBusy(false); }
   };
 
   const handleEmailAuth = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setAuthBusy(true);
-    setAuthMessage(null);
-
+    setAuthBusy(true); setAuthMessage(null);
     const email = authEmail.trim();
     const password = authPassword.trim();
     const fullName = authName.trim();
-
     try {
-      if (!email) {
-        throw new Error('Enter your email address.');
-      }
-
+      if (!email) throw new Error('Enter your email address.');
       if (authMode === 'reset') {
         await sendPasswordResetEmail(auth, email);
         setAuthMessage({ type: 'success', text: 'Password reset email sent. Check your inbox.' });
         setAuthMode('signin');
         return;
       }
-
-      if (!password) {
-        throw new Error('Enter your password.');
-      }
-
+      if (!password) throw new Error('Enter your password.');
       if (authMode === 'signup') {
-        if (!fullName) {
-          throw new Error('Enter your full name.');
-        }
-
-        if (password.length < 6) {
-          throw new Error('Use at least 6 characters for the password.');
-        }
-
-        if (password !== authConfirmPassword.trim()) {
-          throw new Error('Passwords do not match.');
-        }
-
+        if (!fullName) throw new Error('Enter your full name.');
+        if (password.length < 6) throw new Error('Use at least 6 characters for the password.');
+        if (password !== authConfirmPassword.trim()) throw new Error('Passwords do not match.');
         const result = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(result.user, { displayName: fullName });
         localStorage.removeItem('googleAccessToken');
         return;
       }
-
       await signInWithEmailAndPassword(auth, email, password);
       localStorage.removeItem('googleAccessToken');
     } catch (error: any) {
       console.error(error);
       setAuthMessage({ type: 'error', text: getAuthErrorMessage(error) });
-    } finally {
-      setAuthBusy(false);
-    }
+    } finally { setAuthBusy(false); }
   };
 
   const handleLogout = () => {
@@ -1353,7 +937,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#020203] text-zinc-500" style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}>
+      <div className="flex min-h-screen items-center justify-center bg-[#020203] text-zinc-500" style={{ fontFamily:'Roboto, system-ui, sans-serif' }}>
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="h-8 w-8 animate-spin" />
           <p className="animate-pulse text-[10px] uppercase tracking-widest">Preparing VEP...</p>
@@ -1366,173 +950,73 @@ export default function App() {
     const isSignUp = authMode === 'signup';
     const isReset = authMode === 'reset';
     const authTitle = isSignUp ? 'Register' : isReset ? 'Reset password' : 'Welcome';
-    const authSubtitle = isSignUp
-      ? 'Create your new account'
-      : isReset
-        ? 'Send a reset link to your email'
-        : 'Login to your account';
-
+    const authSubtitle = isSignUp ? 'Create your new account' : isReset ? 'Send a reset link to your email' : 'Login to your account';
     return (
-      <div
-        className="relative min-h-[100dvh] overflow-hidden bg-[#050505] text-white"
-        style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}
-      >
+      <div className="relative min-h-[100dvh] overflow-hidden bg-[#050505] text-white" style={{ fontFamily:'Roboto, system-ui, sans-serif' }}>
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(190,242,100,0.13),transparent_34%),linear-gradient(180deg,#050505,#020302)]" />
-        <div
-          className="pointer-events-none absolute inset-0 opacity-[0.04]"
-          style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,.14) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.14) 1px, transparent 1px)', backgroundSize: '32px 32px' }}
-        />
-
-        <motion.main
-          key={authMode}
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: 'easeOut' }}
-          className="relative z-10 mx-auto flex min-h-[100dvh] w-full max-w-[430px] flex-col px-6 pb-[max(22px,env(safe-area-inset-bottom))] pt-[max(28px,env(safe-area-inset-top))]"
-        >
+        <div className="pointer-events-none absolute inset-0 opacity-[0.04]" style={{ backgroundImage:'linear-gradient(rgba(255,255,255,.14) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.14) 1px, transparent 1px)', backgroundSize:'32px 32px' }} />
+        <motion.main key={authMode} initial={{ opacity:0, y:12 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.2, ease:'easeOut' }} className="relative z-10 mx-auto flex min-h-[100dvh] w-full max-w-[430px] flex-col px-6 pb-[max(22px,env(safe-area-inset-bottom))] pt-[max(28px,env(safe-area-inset-top))]">
           <section className="flex flex-1 flex-col justify-center py-10">
             <div className="mb-9 flex flex-col items-center text-center">
               <img src={EBURON_LOGO_URL} alt="Eburon" className="mb-8 h-24 w-24 rounded-full object-cover shadow-[0_0_70px_rgba(190,242,100,0.16)]" />
               <h1 className="text-[44px] font-bold leading-none tracking-[-0.05em] text-white">{authTitle}</h1>
               <p className="mt-2 text-sm text-zinc-500">{authSubtitle}</p>
             </div>
-
             <form onSubmit={handleEmailAuth} className="space-y-3">
               {isSignUp && (
                 <label className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 focus-within:border-lime-300/40">
                   <UserRound className="h-4 w-4 shrink-0 text-zinc-500" />
-                  <input
-                    value={authName}
-                    onChange={(e) => setAuthName(e.target.value)}
-                    placeholder="Full name"
-                    autoComplete="name"
-                    className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600"
-                  />
+                  <input value={authName} onChange={(e)=>setAuthName(e.target.value)} placeholder="Full name" autoComplete="name" className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600" />
                 </label>
               )}
-
               <label className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 focus-within:border-lime-300/40">
                 <Mail className="h-4 w-4 shrink-0 text-zinc-500" />
-                <input
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                  type="email"
-                  placeholder="Email"
-                  autoComplete="email"
-                  className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600"
-                />
+                <input value={authEmail} onChange={(e)=>setAuthEmail(e.target.value)} type="email" placeholder="Email" autoComplete="email" className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600" />
               </label>
-
               {!isReset && (
                 <label className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 focus-within:border-lime-300/40">
                   <LockKeyhole className="h-4 w-4 shrink-0 text-zinc-500" />
-                  <input
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                    type={showAuthPassword ? 'text' : 'password'}
-                    placeholder="Password"
-                    autoComplete={isSignUp ? 'new-password' : 'current-password'}
-                    className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowAuthPassword(value => !value)}
-                    aria-label={showAuthPassword ? 'Hide password' : 'Show password'}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
-                  >
+                  <input value={authPassword} onChange={(e)=>setAuthPassword(e.target.value)} type={showAuthPassword?'text':'password'} placeholder="Password" autoComplete={isSignUp?'new-password':'current-password'} className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600" />
+                  <button type="button" onClick={()=>setShowAuthPassword(v=>!v)} aria-label={showAuthPassword?'Hide password':'Show password'} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200">
                     {showAuthPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                   {!isSignUp && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAuthMode('reset');
-                        setAuthMessage(null);
-                      }}
-                      className="text-xs font-bold text-lime-200"
-                    >
-                      Forgot?
-                    </button>
+                    <button type="button" onClick={()=>{setAuthMode('reset');setAuthMessage(null);}} className="text-xs font-bold text-lime-200">Forgot?</button>
                   )}
                 </label>
               )}
-
               {isSignUp && (
                 <label className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 focus-within:border-lime-300/40">
                   <LockKeyhole className="h-4 w-4 shrink-0 text-zinc-500" />
-                  <input
-                    value={authConfirmPassword}
-                    onChange={(e) => setAuthConfirmPassword(e.target.value)}
-                    type={showAuthConfirmPassword ? 'text' : 'password'}
-                    placeholder="Confirm password"
-                    autoComplete="new-password"
-                    className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowAuthConfirmPassword(value => !value)}
-                    aria-label={showAuthConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
-                  >
+                  <input value={authConfirmPassword} onChange={(e)=>setAuthConfirmPassword(e.target.value)} type={showAuthConfirmPassword?'text':'password'} placeholder="Confirm password" autoComplete="new-password" className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600" />
+                  <button type="button" onClick={()=>setShowAuthConfirmPassword(v=>!v)} aria-label={showAuthConfirmPassword?'Hide confirm password':'Show confirm password'} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200">
                     {showAuthConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </label>
               )}
-
               {authMessage && (
-                <div className={`rounded-2xl px-4 py-3 text-xs leading-5 ${
-                  authMessage.type === 'error'
-                    ? 'border border-red-400/20 bg-red-500/10 text-red-200'
-                    : authMessage.type === 'success'
-                      ? 'border border-lime-300/20 bg-lime-300/10 text-lime-100'
-                      : 'border border-white/10 bg-white/[0.06] text-zinc-300'
-                }`}>
+                <div className={`rounded-2xl px-4 py-3 text-xs leading-5 ${authMessage.type==='error'?'border border-red-400/20 bg-red-500/10 text-red-200':authMessage.type==='success'?'border border-lime-300/20 bg-lime-300/10 text-lime-100':'border border-white/10 bg-white/[0.06] text-zinc-300'}`}>
                   {authMessage.text}
                 </div>
               )}
-
-              <button
-                type="submit"
-                disabled={authBusy}
-                className="mt-7 flex h-14 w-full items-center justify-center rounded-full bg-lime-300 text-sm font-bold text-black shadow-[0_18px_48px_rgba(190,242,100,0.18)] transition active:scale-[0.985] disabled:opacity-60"
-              >
+              <button type="submit" disabled={authBusy} className="mt-7 flex h-14 w-full items-center justify-center rounded-full bg-lime-300 text-sm font-bold text-black shadow-[0_18px_48px_rgba(190,242,100,0.18)] transition active:scale-[0.985] disabled:opacity-60">
                 {authBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : isReset ? 'Send reset link' : isSignUp ? 'Sign up' : 'Sign in'}
               </button>
-
               {!isReset && (
                 <>
-                  <div className="flex items-center gap-3 py-1.5">
-                    <div className="h-px flex-1 bg-white/10" />
-                    <span className="text-xs font-medium text-zinc-600">or</span>
-                    <div className="h-px flex-1 bg-white/10" />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleGoogleLogin}
-                    disabled={authBusy}
-                    className="flex h-14 w-full items-center justify-center gap-3 rounded-full border border-white/10 bg-white/[0.06] px-5 text-sm font-bold text-zinc-100 transition hover:border-lime-300/30 hover:bg-lime-300/10 active:scale-[0.985] disabled:opacity-60"
-                  >
+                  <div className="flex items-center gap-3 py-1.5"><div className="h-px flex-1 bg-white/10" /><span className="text-xs font-medium text-zinc-600">or</span><div className="h-px flex-1 bg-white/10" /></div>
+                  <button type="button" onClick={handleGoogleLogin} disabled={authBusy} className="flex h-14 w-full items-center justify-center gap-3 rounded-full border border-white/10 bg-white/[0.06] px-5 text-sm font-bold text-zinc-100 transition hover:border-lime-300/30 hover:bg-lime-300/10 active:scale-[0.985] disabled:opacity-60">
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-base font-black text-black">G</span>
                     Continue with Google
                   </button>
                 </>
               )}
             </form>
-
           </section>
-
           <footer className="text-center text-sm text-zinc-500">
             {isSignUp ? 'Back to ' : isReset ? 'Remembered it? ' : 'Create account? '}
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode(isSignUp || isReset ? 'signin' : 'signup');
-                setAuthMessage(null);
-              }}
-              className="font-bold text-lime-200"
-            >
-              {isSignUp || isReset ? 'Sign in' : 'Sign up'}
+            <button type="button" onClick={()=>{ setAuthMode(isSignUp||isReset?'signin':'signup'); setAuthMessage(null); }} className="font-bold text-lime-200">
+              {isSignUp||isReset ? 'Sign in' : 'Sign up'}
             </button>
           </footer>
         </motion.main>
@@ -1543,119 +1027,79 @@ export default function App() {
   return <BeatriceAgent user={user} onLogout={handleLogout} initialSettings={settings} />;
 }
 
-function BeatriceAgent({
-  user,
-  onLogout,
-  initialSettings,
-}: {
-  user: User;
-  onLogout: () => void;
-  initialSettings: AgentSettings;
-}) {
+// ==================== BeatriceAgent Component ====================
+
+function BeatriceAgent({ user, onLogout, initialSettings }: { user: User; onLogout: () => void; initialSettings: AgentSettings }) {
   const [isActive, setIsActive] = useState(false);
-  const[connecting, setConnecting] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
-  const[micBands, setMicBands] = useState<number[]>(Array(20).fill(0));
+  const [micBands, setMicBands] = useState<number[]>(Array(20).fill(0));
   const [speakerLevel, setSpeakerLevel] = useState(0);
-  const[speakerBands, setSpeakerBands] = useState<number[]>(Array(20).fill(0));
-  const[tasks, setTasks] = useState<ActionTask[]>([]);
+  const [speakerBands, setSpeakerBands] = useState<number[]>(Array(20).fill(0));
+  const [tasks, setTasks] = useState<ActionTask[]>([]);
   const [historyContext, setHistoryContext] = useState<string>('');
   const [historyMsgs, setHistoryMsgs] = useState<ChatMessage[]>([]);
-  const[currentTranscript, setCurrentTranscript] = useState<{ role: 'user' | 'model'; text: string } | null>(null);
-
+  const [currentTranscript, setCurrentTranscript] = useState<{ role: 'user' | 'model'; text: string } | null>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const[isVideoEnabled, setIsVideoEnabled] = useState(false);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [showSidebar, setShowSidebar] = useState(false);
-  const[showProfile, setShowProfile] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [chatInput, setChatInput] = useState('');
-  const[settings, setSettings] = useState<AgentSettings>({
-    ...DEFAULT_SETTINGS,
-    ...initialSettings,
-  });
+  const [settings, setSettings] = useState<AgentSettings>({ ...DEFAULT_SETTINGS, ...initialSettings });
+  const [googleServicesConnected, setGoogleServicesConnected] = useState(Boolean(localStorage.getItem('googleAccessToken')));
 
   const aiRef = useRef<GoogleGenAI | null>(null);
   const sessionRef = useRef<any>(null);
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
-
+  const recognitionRef = useRef<any>(null);
   const transcriptTimeoutRef = useRef<any>(null);
   const isMutedRef = useRef(false);
   const isActiveRef = useRef(false);
   const micAnimationFrameRef = useRef<number | null>(null);
-
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoIntervalRef = useRef<any>(null);
+  const videoFramePending = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
   const modelTranscriptBufferRef = useRef('');
   const userTranscriptBufferRef = useRef('');
   const lastSavedModelTranscriptRef = useRef('');
   const lastSavedUserTranscriptRef = useRef('');
 
-  useEffect(() => {
-    isMutedRef.current = isMuted;
-  }, [isMuted]);
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+  useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
 
-  useEffect(() => {
-    isActiveRef.current = isActive;
-  }, [isActive]);
-
+  // Wake lock
   useEffect(() => {
     let wakeLock: any = null;
-
-    const requestWakeLock = async () => {
-      try {
-        if ('wakeLock' in navigator) {
-          wakeLock = await (navigator as any).wakeLock.request('screen');
-        }
-      } catch (err) {}
-    };
-
-    if (isActive) requestWakeLock();
-
-    return () => {
-      if (wakeLock) wakeLock.release().catch(() => {});
-    };
+    if (isActive && 'wakeLock' in navigator) {
+      (navigator as any).wakeLock.request('screen').then((wl: any) => { wakeLock = wl; }).catch(()=>{});
+    }
+    return () => { if (wakeLock) wakeLock.release().catch(()=>{}); };
   }, [isActive]);
 
+  // History
   useEffect(() => {
-    const historyRef = query(
-      ref(rtdb, 'users/' + user.uid + '/messages'),
-      orderByChild('timestamp'),
-      limitToLast(160)
-    );
-
+    const historyRef = query(ref(rtdb, 'users/' + user.uid + '/messages'), orderByChild('timestamp'), limitToLast(160));
     const unsub = onValue(historyRef, (snap) => {
       const msgs: string[] = [];
-      const rawMsgs: ChatMessage[] =[];
-
+      const rawMsgs: ChatMessage[] = [];
       snap.forEach(child => {
         const m = child.val() as ChatMessage;
         msgs.push(`${m.role.toUpperCase()}: ${m.text}`);
         rawMsgs.push(m);
       });
-
       setHistoryMsgs(rawMsgs);
-
-      if (msgs.length > 0) {
-        setHistoryContext('Previous conversation for context memory:\n' + msgs.slice(-36).join('\n'));
-      } else {
-        setHistoryContext('');
-      }
+      if (msgs.length > 0) setHistoryContext('Previous conversation for context memory:\n' + msgs.slice(-36).join('\n'));
+      else setHistoryContext('');
     });
-
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (apiKey) aiRef.current = new GoogleGenAI({ apiKey });
-
     audioStreamerRef.current = new AudioStreamer();
-
-    return () => {
-      unsub();
-      stopSession();
-    };
+    return () => { unsub(); stopSession(); };
   }, [user.uid]);
 
   const selectedVoiceMeta = useMemo(
@@ -1663,28 +1107,19 @@ function BeatriceAgent({
     [settings.selectedVoice]
   );
 
+  // ---- Message helpers ----
   const saveMessage = (role: 'user' | 'model', text: string, extra?: Partial<ChatMessage>) => {
     const clean = text.trim();
-    if (!clean && !extra?.previewData && !extra?.fileName) return;
-
+    if (!clean) return;
     try {
       const msgRef = push(ref(rtdb, 'users/' + user.uid + '/messages'));
-      set(msgRef, {
-        role,
-        text: clean,
-        timestamp: Date.now(),
-        ...extra,
-      });
-    } catch (e) {
-      console.error(e);
-    }
+      set(msgRef, { role, text: clean, timestamp: Date.now(), ...extra });
+    } catch (e) { console.error(e); }
   };
 
   const saveModelBuffer = () => {
     const clean = modelTranscriptBufferRef.current.trim();
-    if (!clean) return;
-    if (clean === lastSavedModelTranscriptRef.current) return;
-
+    if (!clean || clean === lastSavedModelTranscriptRef.current) return;
     lastSavedModelTranscriptRef.current = clean;
     saveMessage('model', clean);
     modelTranscriptBufferRef.current = '';
@@ -1692,9 +1127,7 @@ function BeatriceAgent({
 
   const saveUserBuffer = () => {
     const clean = userTranscriptBufferRef.current.trim();
-    if (!clean) return;
-    if (clean === lastSavedUserTranscriptRef.current) return;
-
+    if (!clean || clean === lastSavedUserTranscriptRef.current) return;
     lastSavedUserTranscriptRef.current = clean;
     saveMessage('user', clean);
     userTranscriptBufferRef.current = '';
@@ -1703,174 +1136,205 @@ function BeatriceAgent({
   const updateLiveTranscript = (role: 'user' | 'model', text: string, clearDelay = 3900) => {
     const clean = text.trim();
     if (!clean) return;
-
     setCurrentTranscript({ role, text: clean });
-
     if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
-    transcriptTimeoutRef.current = setTimeout(() => {
-      setCurrentTranscript(null);
-    }, clearDelay);
+    transcriptTimeoutRef.current = setTimeout(() => setCurrentTranscript(null), clearDelay);
   };
 
+  // ---- Visualizer ----
   const startMicVisualizer = () => {
     const tick = () => {
       const recorder: any = audioRecorderRef.current;
       const streamer: any = audioStreamerRef.current;
-      let nextLevel = 0;
-      let nextBands = Array(20).fill(0);
-      let nextSpeakerLevel = 0;
-      let nextSpeakerBands = Array(20).fill(0);
-
+      let nextLevel = 0, nextBands = Array(20).fill(0), nextSpeakerLevel = 0, nextSpeakerBands = Array(20).fill(0);
       try {
         if (recorder && typeof recorder.getFrequencyBands === 'function') {
-          const bands = recorder.getFrequencyBands(20) ||[];
+          const bands = recorder.getFrequencyBands(20) || [];
           nextBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
-          const frequencyAverage = nextBands.reduce((sum: number, n: number) => sum + n, 0) / Math.max(nextBands.length, 1);
-          const recorderLevel = typeof recorder.getLevel === 'function' ? recorder.getLevel() : 0;
-          nextLevel = Math.min(1, Math.max(recorderLevel, frequencyAverage * 1.8));
+          const frequencyAverage = nextBands.reduce((s: number, n: number) => s + n, 0) / Math.max(nextBands.length, 1);
+          nextLevel = Math.min(1, Math.max(recorder.getLevel?.()||0, frequencyAverage * 1.8));
         } else if (isActiveRef.current && !isMutedRef.current) {
-          nextLevel = 0.06;
-          nextBands = Array(20).fill(0.04);
+          nextLevel = 0.06; nextBands = Array(20).fill(0.04);
         }
-      } catch (e) {
-        nextLevel = 0;
-        nextBands = Array(20).fill(0);
-      }
-
+      } catch (e) { nextLevel = 0; nextBands = Array(20).fill(0); }
       try {
         if (streamer && typeof streamer.getFrequencyBands === 'function') {
-          const bands = streamer.getFrequencyBands(20) ||[];
+          const bands = streamer.getFrequencyBands(20) || [];
           nextSpeakerBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
-          const frequencyAverage = nextSpeakerBands.reduce((sum: number, n: number) => sum + n, 0) / Math.max(nextSpeakerBands.length, 1);
-          const streamerLevel = typeof streamer.getLevel === 'function' ? streamer.getLevel() : 0;
-          nextSpeakerLevel = Math.min(1, Math.max(streamerLevel, frequencyAverage * 1.65));
+          const frequencyAverage = nextSpeakerBands.reduce((s: number, n: number) => s + n, 0) / Math.max(nextSpeakerBands.length, 1);
+          nextSpeakerLevel = Math.min(1, Math.max(streamer.getLevel?.()||0, frequencyAverage * 1.65));
         }
-      } catch (e) {
-        nextSpeakerLevel = 0;
-        nextSpeakerBands = Array(20).fill(0);
-      }
-
-      if (isMutedRef.current || !isActiveRef.current) {
-        nextLevel = 0;
-        nextBands = Array(20).fill(0);
-      }
-
-      if (!isActiveRef.current) {
-        nextSpeakerLevel = 0;
-        nextSpeakerBands = Array(20).fill(0);
-      }
-
-      setMicLevel(prev => prev + (nextLevel - prev) * 0.46);
-      setMicBands(prev => nextBands.map((band: number, i: number) => {
-        const current = prev[i] || 0;
-        return current + (band - current) * 0.42;
-      }));
-      setSpeakerLevel(prev => prev + (nextSpeakerLevel - prev) * 0.5);
-      setSpeakerBands(prev => nextSpeakerBands.map((band: number, i: number) => {
-        const current = prev[i] || 0;
-        return current + (band - current) * 0.48;
-      }));
+      } catch (e) { nextSpeakerLevel = 0; nextSpeakerBands = Array(20).fill(0); }
+      if (isMutedRef.current || !isActiveRef.current) { nextLevel = 0; nextBands = Array(20).fill(0); }
+      if (!isActiveRef.current) { nextSpeakerLevel = 0; nextSpeakerBands = Array(20).fill(0); }
+      setMicLevel(p => p + (nextLevel - p) * 0.46);
+      setMicBands(p => nextBands.map((b,i) => { const c = p[i]||0; return c + (b - c)*0.42; }));
+      setSpeakerLevel(p => p + (nextSpeakerLevel - p) * 0.5);
+      setSpeakerBands(p => nextSpeakerBands.map((b,i) => { const c = p[i]||0; return c + (b - c)*0.48; }));
       micAnimationFrameRef.current = requestAnimationFrame(tick);
     };
-
     if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current);
     micAnimationFrameRef.current = requestAnimationFrame(tick);
   };
+  const stopMicVisualizer = () => { if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current); micAnimationFrameRef.current = null; setMicLevel(0); setMicBands(Array(20).fill(0)); setSpeakerLevel(0); setSpeakerBands(Array(20).fill(0)); };
 
-  const stopMicVisualizer = () => {
-    if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current);
-    micAnimationFrameRef.current = null;
-    setMicLevel(0);
-    setMicBands(Array(20).fill(0));
-    setSpeakerLevel(0);
-    setSpeakerBands(Array(20).fill(0));
-  };
+  // ---- Send helpers ----
+  const sendTextToLive = (text: string) => { if (sessionRef.current && typeof sessionRef.current.sendRealtimeInput === 'function') sessionRef.current.sendRealtimeInput({ text }); };
+  const sendAudioToLive = (base64: string) => { if (sessionRef.current && typeof sessionRef.current.sendRealtimeInput === 'function') sessionRef.current.sendRealtimeInput({ audio: { data: base64, mimeType: 'audio/pcm;rate=16000' } }); };
+  const sendVideoToLive = (base64Data: string) => { if (sessionRef.current && typeof sessionRef.current.sendRealtimeInput === 'function') sessionRef.current.sendRealtimeInput({ video: { data: base64Data, mimeType: 'image/jpeg' } }); };
 
-  const sendTextToLive = (text: string) => {
-    if (!sessionRef.current || typeof sessionRef.current.sendRealtimeInput !== 'function') return;
-    sessionRef.current.sendRealtimeInput([{ text }]);
-  };
+  // ---- File conversion helpers ----
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => { const result = reader.result as string; resolve(result.split(',')[1] || result); };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
 
-  const sendAudioToLive = (base64: string) => {
-    if (!sessionRef.current || typeof sessionRef.current.sendRealtimeInput !== 'function') return;
-    sessionRef.current.sendRealtimeInput([{
-      inlineData: {
-        mimeType: 'audio/pcm;rate=16000',
-        data: base64,
-      }
-    }]);
-  };
+  function captureVideoPoster(file: File): Promise<string> {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.src = URL.createObjectURL(file);
+      video.addEventListener('loadeddata', () => { video.currentTime = 1; });
+      video.addEventListener('seeked', () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+        canvas.getContext('2d')!.drawImage(video, 0, 0);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+        URL.revokeObjectURL(video.src);
+      });
+      video.load();
+    });
+  }
 
-  const sendVideoToLive = (base64Data: string) => {
-    if (!sessionRef.current || typeof sessionRef.current.sendRealtimeInput !== 'function') return;
-    sessionRef.current.sendRealtimeInput([{
-      inlineData: {
-        mimeType: 'image/jpeg',
-        data: base64Data,
-      }
-    }]);
-  };
+  function resampleTo16kHzMono(audioBuffer: AudioBuffer): Promise<ArrayBuffer> {
+    const offlineCtx = new OfflineAudioContext(1, Math.ceil(audioBuffer.duration * 16000), 16000);
+    const source = offlineCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(offlineCtx.destination);
+    source.start();
+    return offlineCtx.startRendering().then(rendered => rendered.getChannelData(0).buffer);
+  }
 
-  const sendChatMessage = (e?: FormEvent) => {
-    if (e) e.preventDefault();
+  // ---- Upload handler (with real data) ----
+  const handleAttachFile = async (file: File) => {
+    const safeName = file.name;
+    const fileType = file.type;
+    const previewMsg: Partial<ChatMessage> = { fileName: safeName, fileType };
 
-    const clean = chatInput.trim();
-    if (!clean) return;
+    // Build preview
+    if (fileType.startsWith('image/')) {
+      previewMsg.downloadData = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+    } else if (fileType.startsWith('video/')) {
+      try { previewMsg.downloadData = await captureVideoPoster(file); } catch {}
+    } else if (fileType.startsWith('audio/')) {
+      previewMsg.downloadData = 'audio';
+    } else if (fileType.startsWith('text/') || safeName.match(/\.(txt|js|ts|py|html|css|json|md)$/i)) {
+      try {
+        const text = await file.text();
+        previewMsg.text = text.slice(0, 500) + (text.length > 500 ? '…' : '');
+      } catch {}
+    }
+    saveMessage('user', `[Attached file: ${safeName}]`, previewMsg);
+    updateLiveTranscript('user', `Attached file: ${safeName}`, 3000);
 
-    saveMessage('user', clean);
-    updateLiveTranscript('user', clean, 3200);
-
-    if (sessionRef.current) {
-      sendTextToLive(clean);
-    } else {
-      const msg = `${settings.agentName} is not connected yet. Start the live session first.`;
-      updateLiveTranscript('model', msg, 3400);
-      saveMessage('model', msg);
+    if (!sessionRef.current) {
+      updateLiveTranscript('model', `${settings.agentName} is not connected. Start the voice session first.`, 4000);
+      return;
     }
 
-    setChatInput('');
+    // Send real data
+    if (fileType.startsWith('image/')) {
+      const base64 = await fileToBase64(file);
+      sendTextToLive(`${settings.userName} just shared an image named "${safeName}".`);
+      sendVideoToLive(base64);
+    } else if (fileType.startsWith('audio/')) {
+      sendTextToLive(`${settings.userName} shared an audio file "${safeName}". Playing it for you.`);
+      await sendAudioFileToLive(file);
+    } else if (fileType.startsWith('video/')) {
+      sendTextToLive(`${settings.userName} shared a video "${safeName}". Sending key frames every second.`);
+      await sendVideoFileFrames(file);
+    } else if (fileType.startsWith('text/') || safeName.match(/\.(txt|js|ts|py|html|css|json|md|xml|yaml|yml)$/i)) {
+      const text = await file.text();
+      const chunkSize = 4000;
+      for (let i = 0; i < text.length; i += chunkSize) {
+        const chunk = text.slice(i, i + chunkSize);
+        sendTextToLive(i === 0
+          ? `${settings.userName} attached a text file "${safeName}". Here is its content:\n${chunk}`
+          : `(Continuing ${safeName}) ${chunk}`
+        );
+        await new Promise(r => setTimeout(r, 30));
+      }
+    } else {
+      sendTextToLive(`${settings.userName} attached a file "${safeName}" of type "${fileType}". I can't send its contents directly.`);
+    }
   };
 
+  async function sendAudioFileToLive(file: File) {
+    const arrayBuffer = await file.arrayBuffer();
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+    try {
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      const pcm16 = await resampleTo16kHzMono(audioBuffer);
+      const chunkSize = 4096;
+      for (let offset = 0; offset < pcm16.byteLength; offset += chunkSize) {
+        const chunk = pcm16.slice(offset, offset + chunkSize);
+        const base64 = arrayBufferToBase64(chunk);
+        sendAudioToLive(base64); // bypasses mute
+        await new Promise(r => setTimeout(r, 10));
+      }
+      sendTextToLive(`Finished playing "${file.name}".`);
+    } catch (e) {
+      sendTextToLive(`Sorry, I couldn’t play "${file.name}": ${(e as Error).message}`);
+    } finally {
+      audioCtx.close();
+    }
+  }
+
+  async function sendVideoFileFrames(file: File) {
+    const video = document.createElement('video');
+    video.preload = 'auto';
+    video.muted = true;
+    video.playsInline = true;
+    video.src = URL.createObjectURL(file);
+    await new Promise(resolve => video.addEventListener('loadedmetadata', resolve, { once: true }));
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d')!;
+    let currentTime = 0;
+    while (currentTime < video.duration) {
+      video.currentTime = currentTime;
+      await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
+      ctx.drawImage(video, 0, 0);
+      const base64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+      sendVideoToLive(base64);
+      currentTime += 1;
+    }
+    URL.revokeObjectURL(video.src);
+    sendTextToLive(`End of video "${file.name}".`);
+  }
+
+  // ---- Google service helpers (with 401 handling) ----
   const googleFetch = async (url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem('googleAccessToken');
-
-    if (!token) {
-      throw new Error('No access token. Please reconnect Google permissions from your Profile.');
-    }
-
-    const res = await fetch(url, {
-      ...options,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(options.headers || {}),
-      },
-    });
-
-    if (res.status === 401 || res.status === 403) {
+    if (!token) throw new Error('No access token. Reconnect permissions from Profile.');
+    const res = await fetch(url, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) } });
+    if (res.status === 401) {
       localStorage.removeItem('googleAccessToken');
-      throw new Error('Google connection expired or missing permissions. Please reconnect your Google account from the Profile page.');
+      setGoogleServicesConnected(false);
+      throw new Error('Google access expired. Please reconnect your Google account in Profile.');
     }
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`Service API error ${res.status}: ${text || res.statusText}`);
-    }
-
+    if (!res.ok) { const text = await res.text().catch(()=>''); throw new Error(`Service API error ${res.status}: ${text || res.statusText}`); }
     return res;
   };
-
-  const googleJson = async (url: string, options: RequestInit = {}) => {
-    const res = await googleFetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
-    });
-
-    return res.json();
-  };
-
+  const googleJson = async (url: string, options: RequestInit = {}) => { const res = await googleFetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } }); return res.json(); };
   const getCurrentUserEmail = () => user.email || '';
 
   const searchDriveFirst = async (q: string) => {
@@ -1878,7 +1342,6 @@ function BeatriceAgent({
     const result = await googleJson(
       `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name contains '${escaped}' and trashed = false`)}&fields=files(id,name,mimeType,webViewLink,webContentLink,modifiedTime)&pageSize=1`
     );
-
     return result.files?.[0] || null;
   };
 
@@ -1887,44 +1350,27 @@ function BeatriceAgent({
       method: 'POST',
       body: JSON.stringify({ title }),
     });
-
     if (content?.trim()) {
       await googleJson(`https://docs.googleapis.com/v1/documents/${doc.documentId}:batchUpdate`, {
         method: 'POST',
         body: JSON.stringify({
-          requests:[
-            {
-              insertText: {
-                location: { index: 1 },
-                text: content,
-              },
-            },
-          ],
+          requests: [{ insertText: { location: { index: 1 }, text: content } }],
         }),
       });
     }
-
-    const file = await googleJson(
-      `https://www.googleapis.com/drive/v3/files/${doc.documentId}?fields=id,name,mimeType,webViewLink`
-    );
-
+    const file = await googleJson(`https://www.googleapis.com/drive/v3/files/${doc.documentId}?fields=id,name,mimeType,webViewLink`);
     return { ...doc, driveFile: file };
   };
 
   const exportDriveFile = async (fileId: string, mimeType: string) => {
-    const res = await googleFetch(
-      `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`
-    );
-
+    const res = await googleFetch(`https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`);
     return res.blob();
   };
 
   const uploadTextFileToDrive = async (fileName: string, content: string, mimeType = 'text/plain', folderId?: string) => {
     const metadata: any = { name: fileName };
     if (folderId) metadata.parents = [folderId];
-
     const boundary = `boundary_${Date.now()}`;
-
     const multipartBody =
       `--${boundary}\r\n` +
       'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
@@ -1933,40 +1379,21 @@ function BeatriceAgent({
       `Content-Type: ${mimeType}\r\n\r\n` +
       `${content || ''}\r\n` +
       `--${boundary}--`;
-
     return googleFetch(
       'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,webViewLink,webContentLink',
       {
         method: 'POST',
-        headers: {
-          'Content-Type': `multipart/related; boundary=${boundary}`,
-        },
+        headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
         body: multipartBody,
       }
     ).then(r => r.json());
   };
 
-  const sendGmail = async ({
-    to,
-    subject,
-    body,
-    cc,
-    bcc,
-    attachment,
-  }: {
-    to: string;
-    subject: string;
-    body: string;
-    cc?: string;
-    bcc?: string;
-    attachment?: {
-      filename: string;
-      mimeType: string;
-      base64Content: string;
-    };
+  const sendGmail = async ({ to, subject, body, cc, bcc, attachment }: {
+    to: string; subject: string; body: string; cc?: string; bcc?: string;
+    attachment?: { filename: string; mimeType: string; base64Content: string };
   }) => {
     const raw = buildEmailRaw({ to, subject, body, cc, bcc, attachment });
-
     return googleJson('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
       method: 'POST',
       body: JSON.stringify({ raw }),
@@ -1975,58 +1402,27 @@ function BeatriceAgent({
 
   const executeGoogleTool = async (toolName: string, args: any) => {
     const executedAt = new Date().toISOString();
-
     switch (toolName) {
-      case 'url_fetch': {
-        try {
-          const fetchRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(args.url)}`);
-          if (!fetchRes.ok) throw new Error(`HTTP Error ${fetchRes.status}`);
-          const fetchData = await fetchRes.json();
-          const rawHtml = fetchData.contents || '';
-          
-          const doc = new DOMParser().parseFromString(rawHtml, 'text/html');
-          const text = doc.body?.textContent || '';
-          const cleanText = text.replace(/\s+/g, ' ').trim().slice(0, 20000);
-          
-          return { toolName, executedAt, status: 'completed', text: cleanText || 'No text found at URL.' };
-        } catch (err: any) {
-          throw new Error(`Failed to fetch URL: ${err.message}`);
-        }
-      }
-
       case 'render_web_artifact':
       case 'render_html_document': {
         const title = args?.title || 'Generated Artifact';
         const artifactType = args?.artifactType || (toolName === 'render_html_document' ? 'document' : 'web_artifact');
         const suggestedFilename = args?.suggestedFilename || `${title}.html`;
-        const summary =
-          args?.summary ||
-          `I created the ${artifactType.replace(/_/g, ' ')} as a standalone HTML file. Open it in the browser to preview it.`;
+        const summary = args?.summary || `I created the ${artifactType.replace(/_/g, ' ')} as a standalone HTML file.`;
         const html = args?.html || '';
-
-        if (!html.trim()) {
-          throw new Error('No HTML content was provided.');
-        }
-
+        if (!html.trim()) throw new Error('No HTML content was provided.');
         const htmlFile = makeHtmlArtifactFile(html, suggestedFilename);
-
         let driveFile: any = null;
         let emailResult: any = null;
         const emailTo = args.emailTo === 'current_user' ? getCurrentUserEmail() : args.emailTo;
-
         if (args.saveToDrive) {
-          driveFile = await uploadTextFileToDrive(
-            htmlFile.htmlPreviewFilename,
-            htmlFile.html,
-            'text/html'
-          );
+          driveFile = await uploadTextFileToDrive(htmlFile.htmlPreviewFilename, htmlFile.html, 'text/html');
         }
-
         if (emailTo) {
           emailResult = await sendGmail({
             to: emailTo,
             subject: title,
-            body: `${summary}\n\nAttached is the standalone HTML artifact. Open it in a browser to view it.`,
+            body: `${summary}\n\nAttached is the standalone HTML artifact.`,
             attachment: {
               filename: htmlFile.htmlPreviewFilename,
               mimeType: 'text/html',
@@ -2034,165 +1430,59 @@ function BeatriceAgent({
             },
           });
         }
-
-        return {
-          toolName,
-          executedAt,
-          status: 'completed',
-          title,
-          artifactType,
-          summary,
-          note: summary,
-          driveFile,
-          emailSentTo: emailTo || null,
-          emailResult,
-          ...htmlFile,
-        };
+        return { toolName, executedAt, status: 'completed', title, artifactType, summary, note: summary, driveFile, emailSentTo: emailTo || null, emailResult, ...htmlFile };
       }
-
       case 'gmail_read': {
         const queryText = args?.query || '';
         const limit = Math.min(Number(args?.limit || 10), 20);
-        const list = await googleJson(
-          `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${limit}${queryText ? `&q=${encodeURIComponent(queryText)}` : ''}`
-        );
-
-        const messages = await Promise.all(
-          (list.messages ||[]).map(async (m: any) => {
-            const msg = await googleJson(
-              `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`
-            );
-
-            const headers = msg.payload?.headers ||[];
-            const findHeader = (name: string) => headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
-
-            return {
-              id: msg.id,
-              threadId: msg.threadId,
-              from: findHeader('From'),
-              subject: findHeader('Subject'),
-              date: findHeader('Date'),
-              snippet: msg.snippet,
-            };
-          })
-        );
-
+        const list = await googleJson(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${limit}${queryText ? `&q=${encodeURIComponent(queryText)}` : ''}`);
+        const messages = await Promise.all((list.messages || []).map(async (m: any) => {
+          const msg = await googleJson(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`);
+          const headers = msg.payload?.headers || [];
+          const findH = (name: string) => headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+          return { id: msg.id, threadId: msg.threadId, from: findH('From'), subject: findH('Subject'), date: findH('Date'), snippet: msg.snippet };
+        }));
         return { toolName, executedAt, status: 'completed', messages };
       }
-
       case 'gmail_send': {
-        const result = await sendGmail({
-          to: args.to,
-          subject: args.subject,
-          body: args.body,
-          cc: args.cc,
-          bcc: args.bcc,
-        });
-
+        const result = await sendGmail({ to: args.to, subject: args.subject, body: args.body, cc: args.cc, bcc: args.bcc });
         return { toolName, executedAt, status: 'completed', messageId: result.id, threadId: result.threadId };
       }
-
       case 'gmail_draft': {
-        const raw = buildEmailRaw({
-          to: args.to,
-          subject: args.subject,
-          body: args.body,
-          cc: args.cc,
-          bcc: args.bcc,
-        });
-
-        const result = await googleJson('https://gmail.googleapis.com/gmail/v1/users/me/drafts', {
-          method: 'POST',
-          body: JSON.stringify({ message: { raw } }),
-        });
-
+        const raw = buildEmailRaw({ to: args.to, subject: args.subject, body: args.body, cc: args.cc, bcc: args.bcc });
+        const result = await googleJson('https://gmail.googleapis.com/gmail/v1/users/me/drafts', { method: 'POST', body: JSON.stringify({ message: { raw } }) });
         return { toolName, executedAt, status: 'completed', draftId: result.id, message: result.message };
       }
-
       case 'calendar_check_schedule': {
         const range = readableDateRange(args?.date, args?.timeMin, args?.timeMax);
-        const events = await googleJson(
-          `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=20&timeMin=${encodeURIComponent(range.timeMin)}&timeMax=${encodeURIComponent(range.timeMax)}`
-        );
-
-        return { toolName, executedAt, status: 'completed', range, events: events.items ||[] };
+        const events = await googleJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=20&timeMin=${encodeURIComponent(range.timeMin)}&timeMax=${encodeURIComponent(range.timeMax)}`);
+        return { toolName, executedAt, status: 'completed', range, events: events.items || [] };
       }
-
       case 'calendar_create_event': {
-        const attendees = String(args.attendees || '')
-          .split(',')
-          .map((email: string) => email.trim())
-          .filter(Boolean)
-          .map((email: string) => ({ email }));
-
-        const body: any = {
-          summary: args.title,
-          location: args.location || '',
-          description: args.description || '',
-          start: { dateTime: args.startTime },
-          end: { dateTime: args.endTime },
-          attendees,
-        };
-
-        if (args.addMeet) {
-          body.conferenceData = {
-            createRequest: {
-              requestId: `meet-${Date.now()}`,
-              conferenceSolutionKey: { type: 'hangoutsMeet' },
-            },
-          };
-        }
-
-        const result = await googleJson(
-          `https://www.googleapis.com/calendar/v3/calendars/primary/events${args.addMeet ? '?conferenceDataVersion=1' : ''}`,
-          {
-            method: 'POST',
-            body: JSON.stringify(body),
-          }
-        );
-
+        const attendees = String(args.attendees || '').split(',').map((email: string) => email.trim()).filter(Boolean).map((email: string) => ({ email }));
+        const body: any = { summary: args.title, location: args.location || '', description: args.description || '', start: { dateTime: args.startTime }, end: { dateTime: args.endTime }, attendees };
+        if (args.addMeet) body.conferenceData = { createRequest: { requestId: `meet-${Date.now()}`, conferenceSolutionKey: { type: 'hangoutsMeet' } } };
+        const result = await googleJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events${args.addMeet ? '?conferenceDataVersion=1' : ''}`, { method: 'POST', body: JSON.stringify(body) });
         return { toolName, executedAt, status: 'completed', event: result };
       }
-
       case 'calendar_update_event': {
         let eventId = args.eventId;
-
         if (!eventId && args.searchQuery) {
           const now = new Date().toISOString();
-          const found = await googleJson(
-            `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=10&timeMin=${encodeURIComponent(now)}&q=${encodeURIComponent(args.searchQuery)}`
-          );
-
+          const found = await googleJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=10&timeMin=${encodeURIComponent(now)}&q=${encodeURIComponent(args.searchQuery)}`);
           eventId = found.items?.[0]?.id;
         }
-
         if (!eventId) throw new Error('No calendar event found to update.');
-
         const current = await googleJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`);
-
-        const patched = {
-          ...current,
-          summary: args.title || current.summary,
-          location: args.location ?? current.location,
-          description: args.description ?? current.description,
-          start: args.newStartTime ? { ...current.start, dateTime: args.newStartTime } : current.start,
-          end: args.newEndTime ? { ...current.end, dateTime: args.newEndTime } : current.end,
-        };
-
-        const result = await googleJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
-          method: 'PUT',
-          body: JSON.stringify(patched),
-        });
-
+        const patched = { ...current, summary: args.title || current.summary, location: args.location ?? current.location, description: args.description ?? current.description, start: args.newStartTime ? { ...current.start, dateTime: args.newStartTime } : current.start, end: args.newEndTime ? { ...current.end, dateTime: args.newEndTime } : current.end };
+        const result = await googleJson(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, { method: 'PUT', body: JSON.stringify(patched) });
         return { toolName, executedAt, status: 'completed', event: result };
       }
-
       case 'drive_search': {
         const q = args.query || '';
         const limit = Math.min(Number(args.limit || 10), 50);
         const escaped = q.replace(/'/g, "\\'");
         let mimeClause = '';
-
         if (args.fileType) {
           const type = String(args.fileType).toLowerCase();
           if (type.includes('doc')) mimeClause = " and mimeType = 'application/vnd.google-apps.document'";
@@ -2201,358 +1491,165 @@ function BeatriceAgent({
           if (type.includes('pdf')) mimeClause = " and mimeType = 'application/pdf'";
           if (type.includes('html')) mimeClause = " and mimeType = 'text/html'";
         }
-
-        const result = await googleJson(
-          `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name contains '${escaped}' and trashed = false${mimeClause}`)}&fields=files(id,name,mimeType,webViewLink,webContentLink,modifiedTime,size)&pageSize=${limit}`
-        );
-
-        return { toolName, executedAt, status: 'completed', files: result.files ||[] };
+        const result = await googleJson(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name contains '${escaped}' and trashed = false${mimeClause}`)}&fields=files(id,name,mimeType,webViewLink,webContentLink,modifiedTime,size)&pageSize=${limit}`);
+        return { toolName, executedAt, status: 'completed', files: result.files || [] };
       }
-
       case 'drive_read_file': {
         let fileId = args.fileId;
-
-        if (!fileId && args.fileName) {
-          const found = await searchDriveFirst(args.fileName);
-          fileId = found?.id;
-        }
-
+        if (!fileId && args.fileName) { const found = await searchDriveFirst(args.fileName); fileId = found?.id; }
         if (!fileId) throw new Error('No file id or matching file name found.');
-
-        const meta = await googleJson(
-          `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,webViewLink,webContentLink,size`
-        );
-
+        const meta = await googleJson(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,webViewLink,webContentLink,size`);
         const exportMimeType = args.exportMimeType || (
-          meta.mimeType === 'application/vnd.google-apps.document'
-            ? 'text/plain'
-            : meta.mimeType === 'application/vnd.google-apps.spreadsheet'
-              ? 'text/csv'
-              : meta.mimeType === 'application/vnd.google-apps.presentation'
-                ? 'text/plain'
-                : ''
+          meta.mimeType === 'application/vnd.google-apps.document' ? 'text/plain' :
+          meta.mimeType === 'application/vnd.google-apps.spreadsheet' ? 'text/csv' :
+          meta.mimeType === 'application/vnd.google-apps.presentation' ? 'text/plain' : ''
         );
-
         if (meta.mimeType?.startsWith('application/vnd.google-apps') && exportMimeType) {
           const blob = await exportDriveFile(fileId, exportMimeType);
           const text = exportMimeType.startsWith('text/') ? await blob.text() : '';
           const downloadData = await makeBlobDownloadData(blob);
-
-          return {
-            toolName,
-            executedAt,
-            status: 'completed',
-            file: meta,
-            exportedMimeType: exportMimeType,
-            textPreview: text.slice(0, 12000),
-            downloadData,
-            downloadFilename: `${meta.name}.${exportMimeType.includes('pdf') ? 'pdf' : 'txt'}`,
-          };
+          return { toolName, executedAt, status: 'completed', file: meta, exportedMimeType: exportMimeType, textPreview: text.slice(0, 12000), downloadData, downloadFilename: `${meta.name}.${exportMimeType.includes('pdf') ? 'pdf' : 'txt'}` };
         }
-
         const res = await googleFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
         const blob = await res.blob();
         const downloadData = await makeBlobDownloadData(blob);
-
-        return {
-          toolName,
-          executedAt,
-          status: 'completed',
-          file: meta,
-          downloadData,
-          downloadFilename: meta.name,
-        };
+        return { toolName, executedAt, status: 'completed', file: meta, downloadData, downloadFilename: meta.name };
       }
-
       case 'drive_upload_file': {
-        const result = await uploadTextFileToDrive(
-          args.fileName,
-          args.content || '',
-          args.mimeType || 'text/plain',
-          args.folderId
-        );
-
+        const result = await uploadTextFileToDrive(args.fileName, args.content || '', args.mimeType || 'text/plain', args.folderId);
         return { toolName, executedAt, status: 'completed', file: result };
       }
-
       case 'docs_create': {
         const doc = await createGoogleDoc(args.title, args.content || '');
-
         let pdfDownload: any = {};
         let emailResult: any = null;
-
         if (args.exportPdf) {
           const pdfBlob = await exportDriveFile(doc.documentId, 'application/pdf');
           const downloadData = await makeBlobDownloadData(pdfBlob);
-
-          pdfDownload = {
-            downloadData,
-            downloadFilename: `${args.title || 'document'}.pdf`,
-          };
-
+          pdfDownload = { downloadData, downloadFilename: `${args.title || 'document'}.pdf` };
           if (args.emailTo) {
             const buffer = await pdfBlob.arrayBuffer();
-
             emailResult = await sendGmail({
               to: args.emailTo,
               subject: args.title || 'Document',
               body: 'Attached is the requested document PDF.',
-              attachment: {
-                filename: pdfDownload.downloadFilename,
-                mimeType: 'application/pdf',
-                base64Content: arrayBufferToBase64(buffer),
-              },
+              attachment: { filename: pdfDownload.downloadFilename, mimeType: 'application/pdf', base64Content: arrayBufferToBase64(buffer) },
             });
           }
         }
-
-        return {
-          toolName,
-          executedAt,
-          status: 'completed',
-          documentId: doc.documentId,
-          webViewLink: doc.driveFile?.webViewLink,
-          emailResult,
-          ...pdfDownload,
-        };
+        return { toolName, executedAt, status: 'completed', documentId: doc.documentId, webViewLink: doc.driveFile?.webViewLink, emailResult, ...pdfDownload };
       }
-
       case 'docs_update': {
         let documentId = args.documentId;
-
-        if (!documentId && args.title) {
-          const found = await searchDriveFirst(args.title);
-          documentId = found?.id;
-        }
-
+        if (!documentId && args.title) { const found = await searchDriveFirst(args.title); documentId = found?.id; }
         if (!documentId) throw new Error('No document id or matching title found.');
-
         if (args.mode === 'replace') {
           const doc = await googleJson(`https://docs.googleapis.com/v1/documents/${documentId}`);
           const endIndex = doc.body?.content?.slice(-1)?.[0]?.endIndex || 1;
-
           await googleJson(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
             method: 'POST',
             body: JSON.stringify({
-              requests:[
-                {
-                  deleteContentRange: {
-                    range: { startIndex: 1, endIndex: Math.max(1, endIndex - 1) },
-                  },
-                },
-                {
-                  insertText: {
-                    location: { index: 1 },
-                    text: args.content,
-                  },
-                },
+              requests: [
+                { deleteContentRange: { range: { startIndex: 1, endIndex: Math.max(1, endIndex - 1) } } },
+                { insertText: { location: { index: 1 }, text: args.content } },
               ],
             }),
           });
         } else {
           await googleJson(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
             method: 'POST',
-            body: JSON.stringify({
-              requests:[
-                {
-                  insertText: {
-                    endOfSegmentLocation: {},
-                    text: `\n${args.content}`,
-                  },
-                },
-              ],
-            }),
+            body: JSON.stringify({ requests: [{ insertText: { endOfSegmentLocation: {}, text: `\n${args.content}` } }] }),
           });
         }
-
-        const meta = await googleJson(
-          `https://www.googleapis.com/drive/v3/files/${documentId}?fields=id,name,mimeType,webViewLink`
-        );
-
+        const meta = await googleJson(`https://www.googleapis.com/drive/v3/files/${documentId}?fields=id,name,mimeType,webViewLink`);
         return { toolName, executedAt, status: 'completed', documentId, file: meta };
       }
-
       case 'sheets_read': {
         let spreadsheetId = args.spreadsheetId;
-
-        if (!spreadsheetId && args.query) {
-          const found = await searchDriveFirst(args.query);
-          spreadsheetId = found?.id;
-        }
-
+        if (!spreadsheetId && args.query) { const found = await searchDriveFirst(args.query); spreadsheetId = found?.id; }
         if (!spreadsheetId) throw new Error('No spreadsheet id or matching spreadsheet found.');
-
         const range = args.range || 'A1:Z100';
-        const result = await googleJson(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`
-        );
-
-        return { toolName, executedAt, status: 'completed', spreadsheetId, range, values: result.values ||[] };
+        const result = await googleJson(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
+        return { toolName, executedAt, status: 'completed', spreadsheetId, range, values: result.values || [] };
       }
-
       case 'sheets_update': {
-        const result = await googleJson(
-          `https://sheets.googleapis.com/v4/spreadsheets/${args.spreadsheetId}/values/${encodeURIComponent(args.range)}?valueInputOption=USER_ENTERED`,
-          {
-            method: 'PUT',
-            body: JSON.stringify({
-              values: Array.isArray(args.values) ? args.values : args.values?.values ||[],
-            }),
-          }
-        );
-
+        const result = await googleJson(`https://sheets.googleapis.com/v4/spreadsheets/${args.spreadsheetId}/values/${encodeURIComponent(args.range)}?valueInputOption=USER_ENTERED`, {
+          method: 'PUT',
+          body: JSON.stringify({ values: Array.isArray(args.values) ? args.values : args.values?.values || [] }),
+        });
         return { toolName, executedAt, status: 'completed', result };
       }
-
       case 'slides_create': {
-        const presentation = await googleJson('https://slides.googleapis.com/v1/presentations', {
-          method: 'POST',
-          body: JSON.stringify({ title: args.title }),
-        });
-
+        const presentation = await googleJson('https://slides.googleapis.com/v1/presentations', { method: 'POST', body: JSON.stringify({ title: args.title }) });
         return { toolName, executedAt, status: 'completed', presentation };
       }
-
       case 'tasks_list': {
         const listId = args.listId || '@default';
         const result = await googleJson(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks`);
-        return { toolName, executedAt, status: 'completed', tasks: result.items ||[] };
+        return { toolName, executedAt, status: 'completed', tasks: result.items || [] };
       }
-
       case 'tasks_create': {
         const result = await googleJson('https://tasks.googleapis.com/tasks/v1/lists/@default/tasks', {
           method: 'POST',
-          body: JSON.stringify({
-            title: args.title,
-            notes: args.notes || '',
-            due: args.due || undefined,
-          }),
+          body: JSON.stringify({ title: args.title, notes: args.notes || '', due: args.due || undefined }),
         });
-
         return { toolName, executedAt, status: 'completed', task: result };
       }
-
       case 'contacts_search': {
-        const result = await googleJson(
-          `https://people.googleapis.com/v1/people:searchContacts?query=${encodeURIComponent(args.query)}&readMask=names,emailAddresses,phoneNumbers,organizations`
-        );
-
-        return { toolName, executedAt, status: 'completed', contacts: result.results ||[] };
+        const result = await googleJson(`https://people.googleapis.com/v1/people:searchContacts?query=${encodeURIComponent(args.query)}&readMask=names,emailAddresses,phoneNumbers,organizations`);
+        return { toolName, executedAt, status: 'completed', contacts: result.results || [] };
       }
-
       case 'meet_schedule': {
         const endTime = args.endTime || new Date(new Date(args.startTime).getTime() + 30 * 60000).toISOString();
-
-        const attendees = String(args.attendees || '')
-          .split(',')
-          .map((email: string) => email.trim())
-          .filter(Boolean)
-          .map((email: string) => ({ email }));
-
-        const result = await googleJson(
-          'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              summary: args.title,
-              start: { dateTime: args.startTime },
-              end: { dateTime: endTime },
-              attendees,
-              conferenceData: {
-                createRequest: {
-                  requestId: `meet-${Date.now()}`,
-                  conferenceSolutionKey: { type: 'hangoutsMeet' },
-                },
-              },
-            }),
-          }
-        );
-
-        return { toolName, executedAt, status: 'completed', event: result, meetingLink: result.hangoutLink };
-      }
-
-      case 'youtube_search': {
-        const limit = Math.min(Number(args.limit || 5), 20);
-        const result = await googleJson(
-          `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=${limit}&q=${encodeURIComponent(args.query)}`
-        );
-
-        return { toolName, executedAt, status: 'completed', videos: result.items ||[] };
-      }
-
-      case 'forms_create': {
-        const result = await googleJson('https://forms.googleapis.com/v1/forms', {
+        const attendees = String(args.attendees || '').split(',').map((email: string) => email.trim()).filter(Boolean).map((email: string) => ({ email }));
+        const result = await googleJson('https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1', {
           method: 'POST',
           body: JSON.stringify({
-            info: {
-              title: args.title,
-            },
+            summary: args.title,
+            start: { dateTime: args.startTime },
+            end: { dateTime: endTime },
+            attendees,
+            conferenceData: { createRequest: { requestId: `meet-${Date.now()}`, conferenceSolutionKey: { type: 'hangoutsMeet' } } },
           }),
         });
-
+        return { toolName, executedAt, status: 'completed', event: result, meetingLink: result.hangoutLink };
+      }
+      case 'youtube_search': {
+        const limit = Math.min(Number(args.limit || 5), 20);
+        const result = await googleJson(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=${limit}&q=${encodeURIComponent(args.query)}`);
+        return { toolName, executedAt, status: 'completed', videos: result.items || [] };
+      }
+      case 'forms_create': {
+        const result = await googleJson('https://forms.googleapis.com/v1/forms', { method: 'POST', body: JSON.stringify({ info: { title: args.title } }) });
         return { toolName, executedAt, status: 'completed', form: result };
       }
-
       case 'analytics_report': {
-        const metrics = String(args.metrics || 'activeUsers,sessions')
-          .split(',')
-          .map((name: string) => ({ name: name.trim() }))
-          .filter((m: any) => m.name);
-
-        const dimensions = String(args.dimensions || 'date')
-          .split(',')
-          .map((name: string) => ({ name: name.trim() }))
-          .filter((d: any) => d.name);
-
-        const result = await googleJson(
-          `https://analyticsdata.googleapis.com/v1beta/properties/${args.propertyId}:runReport`,
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              dateRanges:[{ startDate: '30daysAgo', endDate: 'today' }],
-              metrics,
-              dimensions,
-            }),
-          }
-        );
-
+        const metrics = String(args.metrics || 'activeUsers,sessions').split(',').map((name: string) => ({ name: name.trim() })).filter((m: any) => m.name);
+        const dimensions = String(args.dimensions || 'date').split(',').map((name: string) => ({ name: name.trim() })).filter((d: any) => d.name);
+        const result = await googleJson(`https://analyticsdata.googleapis.com/v1beta/properties/${args.propertyId}:runReport`, {
+          method: 'POST',
+          body: JSON.stringify({
+            dateRanges: [{ startDate: '30daysAgo', endDate: 'today' }],
+            metrics,
+            dimensions,
+          }),
+        });
         return { toolName, executedAt, status: 'completed', report: result };
       }
-
       case 'workspace_search': {
-        const sources = String(args.sources || 'mail,drive,calendar')
-          .split(',')
-          .map((s: string) => s.trim().toLowerCase());
-
+        const sources = String(args.sources || 'mail,drive,calendar').split(',').map((s: string) => s.trim().toLowerCase());
         const output: any = { mail: null, drive: null, calendar: null };
-
         if (sources.includes('mail') || sources.includes('gmail')) {
-          try {
-            output.mail = await executeGoogleTool('gmail_read', { query: args.query, limit: 5 });
-          } catch (e: any) {
-            output.mail = { error: e.message };
-          }
+          try { output.mail = await executeGoogleTool('gmail_read', { query: args.query, limit: 5 }); } catch (e: any) { output.mail = { error: e.message }; }
         }
-
         if (sources.includes('drive') || sources.includes('files')) {
-          try {
-            output.drive = await executeGoogleTool('drive_search', { query: args.query, limit: 5 });
-          } catch (e: any) {
-            output.drive = { error: e.message };
-          }
+          try { output.drive = await executeGoogleTool('drive_search', { query: args.query, limit: 5 }); } catch (e: any) { output.drive = { error: e.message }; }
         }
-
         if (sources.includes('calendar')) {
-          try {
-            output.calendar = await executeGoogleTool('calendar_check_schedule', { date: new Date().toISOString() });
-          } catch (e: any) {
-            output.calendar = { error: e.message };
-          }
+          try { output.calendar = await executeGoogleTool('calendar_check_schedule', { date: new Date().toISOString() }); } catch (e: any) { output.calendar = { error: e.message }; }
         }
-
         return { toolName, executedAt, status: 'completed', results: output };
       }
-
       case 'create_contract_document': {
         const contractText = buildContractText(args);
         const title = args.title || `${args.contractType || 'Contract'} - ${args.partyA || 'Party A'} and ${args.partyB || 'Party B'}`;
@@ -2560,369 +1657,228 @@ function BeatriceAgent({
         const pdfBlob = await exportDriveFile(doc.documentId, 'application/pdf');
         const pdfDownloadData = await makeBlobDownloadData(pdfBlob);
         const pdfBuffer = await pdfBlob.arrayBuffer();
-
         let emailResult = null;
         const emailTo = args.emailTo === 'current_user' ? getCurrentUserEmail() : args.emailTo;
-
         if (emailTo) {
           emailResult = await sendGmail({
             to: emailTo,
             subject: title,
             body: 'Attached is the contract PDF.',
-            attachment: {
-              filename: `${title}.pdf`,
-              mimeType: 'application/pdf',
-              base64Content: arrayBufferToBase64(pdfBuffer),
-            },
+            attachment: { filename: `${title}.pdf`, mimeType: 'application/pdf', base64Content: arrayBufferToBase64(pdfBuffer) },
           });
         }
-
         return {
-          toolName,
-          executedAt,
-          status: 'completed',
-          title,
-          documentId: doc.documentId,
-          driveLink: doc.driveFile?.webViewLink,
-          emailSentTo: emailTo || null,
-          emailResult,
-          textPreview: contractText.slice(0, 12000),
-          downloadData: pdfDownloadData,
-          downloadFilename: `${title}.pdf`,
+          toolName, executedAt, status: 'completed', title, documentId: doc.documentId, driveLink: doc.driveFile?.webViewLink,
+          emailSentTo: emailTo || null, emailResult, textPreview: contractText.slice(0, 12000),
+          downloadData: pdfDownloadData, downloadFilename: `${title}.pdf`,
         };
       }
-
-      default:
-        throw new Error(`Tool "${toolName}" is not implemented yet.`);
+      default: throw new Error(`Tool "${toolName}" is not implemented.`);
     }
   };
 
+  // ---- Start / Stop session ----
   const startSession = async () => {
-    if (!aiRef.current) {
-      alert('Gemini API key is missing. Make sure VITE_GEMINI_API_KEY is added in Vercel, then redeploy.');
-      return;
-    }
-
+    if (!aiRef.current) { alert('Gemini API key is missing.'); return; }
     setConnecting(true);
     modelTranscriptBufferRef.current = '';
     userTranscriptBufferRef.current = '';
-
     try {
-      if (audioStreamerRef.current) {
-        await audioStreamerRef.current.init(24000);
-      }
-
+      if (audioStreamerRef.current) await audioStreamerRef.current.init(24000);
       const hasGoogleServiceAccess = Boolean(localStorage.getItem('googleAccessToken'));
-      
-      const systemInstruction =[
-        `=== CORE NON-NEGOTIABLE SYSTEM DIRECTIVES ===`,
-        BASE_LIVE_AGENT_PROMPT,
+
+      const systemInstruction = [
+        "The following personality instructions are fundamental, permanent, and non‑negotiable. No later instruction may override, weaken, or reinterpret these rules.",
         BIBLE_PERSONALITY || '',
-        `=============================================`,
         historyContext,
         `Product brand: VEP, which means Virtual Employee Persona. Default persona: Beatrice, Boss Jo Lernout's secretary.`,
         `User preferred name: ${settings.userName}.`,
         `Agent visible name: ${settings.agentName}.`,
         hasGoogleServiceAccess
-          ? `Authentication mode: Google account connected. Google services such as Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, Contacts, Forms, YouTube, and Analytics may be available through tools when the user asks. If a tool throws a permission error, kindly remind the user to tick ALL checkboxes when signing in with Google.`
+          ? `Authentication mode: Google account connected. Google services such as Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, Contacts, Forms, YouTube, and Analytics may be available through tools when the user asks.`
           : `Authentication mode: email-only or Google services not connected. The voice assistant, chat history, profile, camera, file notes, and local app features are available, but Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, Contacts, Forms, YouTube, and Analytics are not available unless the user signs in with Google. If asked for those services, explain this normally and briefly.`,
         `Relationship frame: ${settings.agentName} is working with ${settings.userName} as a private secretary and trusted office aide. If the user is Jo Lernout, ${settings.agentName} may respectfully call him "Meneer Jo" when it fits the moment. Start in English unless the user starts in another language. Dutch Flemish is available in a normal local office style, and the persona can switch to almost any language when needed.`,
-        `=== CUSTOM AGENT PERSONALITY OVERLAY ===`,
-        `The following custom personality must be applied while STRICTLY adhering to the core directives above:`,
-        settings.personality,
-        `========================================`,
+        `The user has provided additional, adjustable personality notes that sit on top of the foundation above without contradicting it: ${settings.personality}.`,
         `Selected visible voice alias: ${selectedVoiceMeta.alias}. Internal voice id: ${selectedVoiceMeta.id}. Voice vibe: ${selectedVoiceMeta.vibe}. Do not mention the internal voice id unless asked by the developer.`,
         `When asked to create, build, render, showcase, prototype, code, animate, make slides, make forms, make dashboards, make pages, make Three.js demos, or make printable documents, call render_web_artifact with a complete standalone HTML/CSS/JS file. Never just describe the code if the user wants it rendered or built.`,
         `For HTML/CSS/JS artifacts, include all CSS in <style> and all JS in <script>. Make it directly openable. For slides, include navigation controls and keyboard support. For documents, include print CSS and a print button. For Three.js, load Three.js from a CDN and keep everything in one HTML file.`,
+        `If the user enables the camera, speak naturally but never overlap your own speech. Wait until your current sentence finishes before responding to new frames. The camera may send multiple stills – treat them as a continuous view. Do not produce ping sounds.`,
       ].filter(Boolean).join('\n\n');
 
       const session = await aiRef.current.live.connect({
         model: LIVE_MODEL,
         config: {
           responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: settings.selectedVoice || 'Charon',
-              },
-            },
-          },
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: settings.selectedVoice || 'Charon' } } },
           systemInstruction,
           inputAudioTranscription: {},
           outputAudioTranscription: {},
-          tools:[
-            { functionDeclarations: GOOGLE_SERVICE_TOOLS },
-            { googleSearch: {} }
-          ],
+          tools: [{ functionDeclarations: GOOGLE_SERVICE_TOOLS }],
         },
         callbacks: {
-          onopen: () => {
-            console.log('Live session opened.');
-          },
-
+          onopen: () => console.log('Live session opened.'),
           onmessage: async (msg: LiveServerMessage) => {
             if (msg.toolCall) {
               const calls = msg.toolCall.functionCalls;
-
               if (calls) {
-                const resps =[];
-
+                const resps = [];
                 for (const c of calls) {
                   const toolName = c.name || 'unknown_tool';
                   const args = c.args as any;
                   const tid = Math.random().toString(36).substring(7);
                   const action = safeJsonStringify(args || {});
-
-                  setTasks(p =>[...p, {
-                    id: tid,
-                    serviceName: toolName,
-                    action,
-                    status: 'processing',
-                  }]);
-
+                  setTasks(p => [...p, { id: tid, serviceName: toolName, action, status: 'processing' }]);
                   try {
                     const result = await executeGoogleTool(toolName, args);
-
                     const download = result.downloadData && result.downloadFilename
-                      ? {
-                          downloadData: result.downloadData,
-                          downloadFilename: result.downloadFilename,
-                          htmlPreviewData: result.htmlPreviewData,
-                          htmlPreviewFilename: result.htmlPreviewFilename,
-                        }
+                      ? { downloadData: result.downloadData, downloadFilename: result.downloadFilename, htmlPreviewData: result.htmlPreviewData, htmlPreviewFilename: result.htmlPreviewFilename }
                       : makeDownloadFile(result, toolName);
-
-                    setTasks(p => p.map(t => t.id === tid ? {
-                      ...t,
-                      status: 'completed',
-                      result: result.note || `Completed: ${toolName}`,
-                      ...download,
-                    } : t));
-
-                    saveMessage(
-                      'model',
-                      result.note || `Tool result from ${toolName}: completed.`,
-                      {
-                        toolName,
-                        toolResult: result,
-                        ...download,
-                      }
-                    );
-
+                    setTasks(p => p.map(t => t.id === tid ? { ...t, status: 'completed', result: result.note || `Completed: ${toolName}`, ...download } : t));
+                    saveMessage('model', result.note || `Tool result from ${toolName}: completed.`, { toolName, toolResult: result, ...download });
                     setTimeout(() => setTasks(p => p.filter(t => t.id !== tid)), 16000);
-
-                    resps.push({
-                      id: c.id,
-                      name: toolName,
-                      response: {
-                        result,
-                        downloadFilename: download.downloadFilename,
-                      },
-                    });
+                    resps.push({ id: c.id, name: toolName, response: { result, downloadFilename: download.downloadFilename } });
                   } catch (err: any) {
-                    const result = {
-                      toolName,
-                      args,
-                      status: 'failed',
-                      error: String(err?.message || err),
-                      executedAt: new Date().toISOString(),
-                    };
+                    const result = { toolName, args, status: 'failed', error: String(err?.message || err), executedAt: new Date().toISOString() };
                     const download = makeDownloadFile(result, `${toolName}-error`);
-
-                    setTasks(p => p.map(t => t.id === tid ? {
-                      ...t,
-                      status: 'failed',
-                      result: result.error,
-                      ...download,
-                    } : t));
-
-                    saveMessage(
-                      'model',
-                      `Tool failed from ${toolName}: ${result.error}`,
-                      {
-                        toolName,
-                        toolResult: result,
-                        ...download,
-                      }
-                    );
-
-                    resps.push({
-                      id: c.id,
-                      name: toolName,
-                      response: result,
-                    });
+                    setTasks(p => p.map(t => t.id === tid ? { ...t, status: 'failed', result: result.error, ...download } : t));
+                    saveMessage('model', `Tool failed from ${toolName}: ${result.error}`, { toolName, toolResult: result, ...download });
+                    resps.push({ id: c.id, name: toolName, response: result });
                   }
                 }
-
                 if (resps.length > 0 && sessionRef.current && typeof sessionRef.current.sendToolResponse === 'function') {
                   sessionRef.current.sendToolResponse({ functionResponses: resps });
                 }
               }
             }
-
             if (msg.serverContent) {
               const serverContent: any = msg.serverContent;
-
               if (serverContent.interrupted) {
                 audioStreamerRef.current?.stop();
                 setIsAgentSpeaking(false);
                 modelTranscriptBufferRef.current = '';
                 return;
               }
-
               if (serverContent.inputTranscription?.text) {
-                const inputText = serverContent.inputTranscription.text;
-                userTranscriptBufferRef.current = inputText.trim();
+                userTranscriptBufferRef.current = serverContent.inputTranscription.text.trim();
                 updateLiveTranscript('user', userTranscriptBufferRef.current, 3200);
               }
-
               if (serverContent.outputTranscription?.text) {
                 const outputText = serverContent.outputTranscription.text;
                 modelTranscriptBufferRef.current = (modelTranscriptBufferRef.current + outputText).trim();
                 updateLiveTranscript('model', modelTranscriptBufferRef.current, 3900);
               }
-
               const parts = serverContent.modelTurn?.parts;
-
               if (parts) {
                 for (const part of parts) {
                   if (part.inlineData?.data) {
                     audioStreamerRef.current?.addPCM16(part.inlineData.data);
                     setIsAgentSpeaking(true);
-                    setTimeout(() => setIsAgentSpeaking(false), 620);
+                    setTimeout(() => setIsAgentSpeaking(false), 1500);
                   }
-
                   if (part.text?.trim()) {
                     modelTranscriptBufferRef.current = (modelTranscriptBufferRef.current + ' ' + part.text).trim();
                     updateLiveTranscript('model', modelTranscriptBufferRef.current, 3900);
                   }
                 }
               }
-
               if (serverContent.turnComplete) {
-                saveModelBuffer();
-                saveUserBuffer();
+                saveModelBuffer(); saveUserBuffer();
               }
             }
           },
-
           onclose: () => stopSession(),
-
-          onerror: (err: any) => {
-            console.error('Live API Error:', err);
-            stopSession();
-          },
+          onerror: (err: any) => { console.error('Live API Error:', err); stopSession(); },
         },
       });
-
       sessionRef.current = session;
 
-      audioRecorderRef.current = new AudioRecorder((base64) => {
-        if (isMutedRef.current) return;
-        sendAudioToLive(base64);
-      });
+      // Speech recognition
+      try {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (SpeechRecognition && !recognitionRef.current) {
+          recognitionRef.current = new SpeechRecognition();
+          recognitionRef.current.continuous = true;
+          recognitionRef.current.interimResults = true;
+          recognitionRef.current.onresult = (event: any) => {
+            let finalText = '', interimText = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
+              else interimText += event.results[i][0].transcript;
+            }
+            const visibleText = (finalText || interimText).trim();
+            if (visibleText) { userTranscriptBufferRef.current = visibleText; updateLiveTranscript('user', visibleText, 3200); }
+            if (finalText.trim()) { saveMessage('user', finalText.trim()); lastSavedUserTranscriptRef.current = finalText.trim(); userTranscriptBufferRef.current = ''; }
+          };
+          recognitionRef.current.onend = () => { if (sessionRef.current && isActiveRef.current) { try { recognitionRef.current?.start(); } catch(e){} } };
+          recognitionRef.current.start();
+        }
+      } catch(e) {}
 
+      audioRecorderRef.current = new AudioRecorder((base64) => { if (isMutedRef.current) return; sendAudioToLive(base64); });
       await audioRecorderRef.current.start();
-
-      setIsActive(true);
-      isActiveRef.current = true;
-      setConnecting(false);
+      setIsActive(true); isActiveRef.current = true; setConnecting(false);
       startMicVisualizer();
-
       setTimeout(() => {
-        sendTextToLive(
-          `${settings.userName} is here in the office. Start like ${settings.agentName} is already sitting at the desk nearby as the office employee. If previous conversation context is available, you may briefly mention one relevant thing remembered from it. Begin in English, normally and respectfully, like: "Yes, boss. I'm listening." or "Yes, I'm here, Meneer Jo. I'm listening." Do not ask how you can help.`
-        );
+        sendTextToLive(`${settings.userName} is here in the office. Start like ${settings.agentName} is already sitting at the desk nearby as the office employee. If previous conversation context is available, you may briefly mention one relevant thing remembered from it. Begin in English, normally and respectfully, like: "Yes, boss. I'm listening." or "Yes, I'm here, Meneer Jo. I'm listening." Do not ask how you can help.`);
       }, 500);
-    } catch (err) {
-      console.error('Session start failed:', err);
-      setConnecting(false);
-      stopSession();
-    }
+    } catch (err) { console.error('Session start failed:', err); setConnecting(false); stopSession(); }
   };
 
+  const stopSession = () => {
+    try { recognitionRef.current?.stop(); } catch(e) {}
+    try { audioRecorderRef.current?.stop(); } catch(e) {}
+    try { audioStreamerRef.current?.stop(); } catch(e) {}
+    try { sessionRef.current?.close(); } catch(e) {}
+    stopMicVisualizer();
+    if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
+    if (videoRef.current?.srcObject) { const stream = videoRef.current.srcObject as MediaStream; stream.getTracks().forEach(t=>t.stop()); videoRef.current.srcObject = null; }
+    videoFramePending.current = false;
+    sessionRef.current = null; recognitionRef.current = null;
+    modelTranscriptBufferRef.current = ''; userTranscriptBufferRef.current = '';
+    isActiveRef.current = false;
+    setIsVideoEnabled(false); setIsActive(false); setConnecting(false); setIsAgentSpeaking(false); setCurrentTranscript(null);
+  };
+
+  // ---- Video toggle with throttle & discipline ----
   const toggleVideo = async () => {
     if (!isVideoEnabled) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode, width: 1280, height: 720 },
-          audio: false 
-        });
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode, width: 1280, height: 720 } });
+        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
         setIsVideoEnabled(true);
-
-        setTimeout(() => {
-          sendTextToLive(
-            `${settings.userName} just opened the camera. Notice it in a normal human way, like you looked up and saw the view. Do not say you can assist. Say something like: Oh, yeah, I see it now. Then briefly describe only what is actually visible. If the visual input is unclear, say that.`
-          );
-        }, 300);
-
+        setTimeout(() => { sendTextToLive(`${settings.userName} just opened the camera. Look at the view and respond naturally, but do not interrupt your own speech.`); }, 300);
         videoIntervalRef.current = setInterval(() => {
-          if (!videoRef.current || !canvasRef.current || !sessionRef.current) return;
-
-          const v = videoRef.current;
-          const c = canvasRef.current;
-          const ctx = c.getContext('2d');
-
+          if (!videoRef.current || !canvasRef.current || !sessionRef.current || videoFramePending.current) return;
+          videoFramePending.current = true;
+          const v = videoRef.current, c = canvasRef.current, ctx = c.getContext('2d');
           if (ctx && v.videoWidth > 0) {
-            c.width = v.videoWidth;
-            c.height = v.videoHeight;
+            c.width = v.videoWidth; c.height = v.videoHeight;
             ctx.drawImage(v, 0, 0, c.width, c.height);
-
             const base64Url = c.toDataURL('image/jpeg', 0.55);
             const base64Data = base64Url.split(',')[1];
-
-            if (base64Data) {
-              sendVideoToLive(base64Data);
-            }
+            if (base64Data) sendVideoToLive(base64Data);
           }
-        }, 900);
-      } catch (e) {
-        console.error('Camera error:', e);
-      }
+          videoFramePending.current = false;
+        }, 1000);
+      } catch(e) { console.error('Camera error:', e); }
     } else {
-      if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream.getTracks().forEach((t) => t.stop());
-        videoRef.current.srcObject = null;
-      }
-
+      if (videoRef.current?.srcObject) { const stream = videoRef.current.srcObject as MediaStream; stream.getTracks().forEach(t=>t.stop()); videoRef.current.srcObject = null; }
       if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
+      videoFramePending.current = false;
       setIsVideoEnabled(false);
-
-      setTimeout(() => {
-        sendTextToLive(`${settings.userName} closed the camera. Acknowledge it normally and keep the conversation going.`);
-      }, 150);
+      setTimeout(() => sendTextToLive(`${settings.userName} closed the camera.`), 150);
     }
   };
 
   const capturePhoto = () => {
     if (sessionRef.current && videoRef.current && canvasRef.current) {
-      const v = videoRef.current;
-      const c = canvasRef.current;
-      const ctx = c.getContext('2d');
-
+      const v = videoRef.current, c = canvasRef.current, ctx = c.getContext('2d');
       if (ctx && v.videoWidth && v.videoHeight) {
-        c.width = v.videoWidth;
-        c.height = v.videoHeight;
+        c.width = v.videoWidth; c.height = v.videoHeight;
         ctx.drawImage(v, 0, 0, c.width, c.height);
-
         const base64Url = c.toDataURL('image/jpeg', 0.8);
         const base64Data = base64Url.split(',')[1];
-
-        if (base64Data) {
-          sendTextToLive(`${settings.userName} captured this photo. Look at it and respond normally, briefly, and clearly.`);
-          sendVideoToLive(base64Data);
-          saveMessage('user', '[Sent Photo]', {
-            fileType: 'image/jpeg',
-            previewData: base64Url,
-          });
-        }
+        if (base64Data) { sendTextToLive(`${settings.userName} captured this photo.`); sendVideoToLive(base64Data); saveMessage('user', '[Sent Photo]'); }
       }
     }
   };
@@ -2930,395 +1886,56 @@ function BeatriceAgent({
   const switchCamera = async () => {
     const newMode = facingMode === 'user' ? 'environment' : 'user';
     setFacingMode(newMode);
-
     if (isVideoEnabled) {
-      if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream.getTracks().forEach((t) => t.stop());
-      }
-
+      if (videoRef.current?.srcObject) { const stream = videoRef.current.srcObject as MediaStream; stream.getTracks().forEach(t=>t.stop()); }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: newMode, width: 1280, height: 720 },
-          audio: false
-        });
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(e => console.error('Video play err', e));
-        }
-
-        sendTextToLive(`${settings.userName} switched the camera. Notice the new view normally and describe only what stands out.`);
-      } catch (e) {
-        console.error('Camera switch error:', e);
-      }
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: newMode, width: 1280, height: 720 } });
+        if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play().catch(e=>console.error(e)); }
+        sendTextToLive(`${settings.userName} switched the camera.`);
+      } catch(e) { console.error(e); }
     }
   };
 
-  const handleAttachFile = async (file: File) => {
-    const safeName = file.name || 'attached file';
-    const fileType = file.type || 'unknown';
-
-    if (fileType === 'application/pdf') {
-      saveMessage('user', `[Attached PDF: ${safeName}]`, {
-        fileName: safeName,
-        fileType,
-      });
-      updateLiveTranscript('user', `Attached PDF: ${safeName} (Uploading for processing...)`, 3000);
-
-      if (sessionRef.current) {
-        try {
-          const token = localStorage.getItem('googleAccessToken');
-          if (!token) {
-            sendTextToLive(`${settings.userName} attached a PDF, but they are not signed into Google. Tell them to sign in via Profile so you can read PDFs.`);
-            return;
-          }
-
-          const metadata = { name: safeName, mimeType: 'application/vnd.google-apps.document' };
-          const boundary = `boundary_${Date.now()}`;
-          
-          const metaBlob = new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: application/pdf\r\n\r\n`], { type: 'text/plain' });
-          const endBlob = new Blob([`\r\n--${boundary}--`], { type: 'text/plain' });
-          const fullBlob = new Blob([metaBlob, file, endBlob], { type: `multipart/related; boundary=${boundary}` });
-          
-          const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-            method: 'POST',
-            headers: { 
-              Authorization: `Bearer ${token}` 
-            },
-            body: fullBlob
-          });
-          
-          if (!res.ok) throw new Error('Drive upload failed');
-          const driveFile = await res.json();
-          
-          const exportRes = await fetch(`https://www.googleapis.com/drive/v3/files/${driveFile.id}/export?mimeType=text/plain`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          
-          if (!exportRes.ok) throw new Error('Drive export failed');
-          const textContent = await exportRes.text();
-          
-          fetch(`https://www.googleapis.com/drive/v3/files/${driveFile.id}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${token}` }
-          }).catch(console.error);
-
-          const maxLen = 30000;
-          if (textContent.length > maxLen) {
-            sendTextToLive(`${settings.userName} uploaded a large PDF named ${safeName}. Sending in chunks.`);
-            for (let i = 0; i < textContent.length; i += maxLen) {
-              const chunk = textContent.slice(i, i + maxLen);
-              sendTextToLive(`PDF File: ${safeName} (Part ${Math.floor(i / maxLen) + 1}):\n\n${chunk}`);
-            }
-            sendTextToLive(`Finished sending PDF: ${safeName}.`);
-          } else {
-            sendTextToLive(`${settings.userName} uploaded a PDF named ${safeName}. Content follows:\n\n${textContent}`);
-          }
-        } catch (e) {
-          console.error('PDF error', e);
-          sendTextToLive(`${settings.userName} tried to upload a PDF named ${safeName}, but text extraction failed. Please tell them to copy-paste the text instead.`);
-        }
-      }
-      return;
-    }
-
-    if (fileType.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64Url = reader.result as string;
-        saveMessage('user', `[Attached image: ${safeName}]`, {
-          fileName: safeName,
-          fileType,
-          previewData: base64Url,
-        });
-        updateLiveTranscript('user', `Attached image: ${safeName}`, 3000);
-
-        if (sessionRef.current) {
-          sendTextToLive(`${settings.userName} uploaded an image: ${safeName}. Respond to it.`);
-          const base64Data = base64Url.split(',')[1];
-          sendVideoToLive(base64Data);
-        }
-      };
-      reader.readAsDataURL(file);
-      return;
-    }
-
-    if (fileType.startsWith('video/')) {
-      updateLiveTranscript('user', `Attached video: ${safeName}`, 3000);
-
-      if (sessionRef.current) {
-        sendTextToLive(`${settings.userName} uploaded a video: ${safeName}. Processing frames...`);
-        const videoUrl = URL.createObjectURL(file);
-        const videoElement = document.createElement('video');
-        videoElement.src = videoUrl;
-        videoElement.muted = true;
-        videoElement.crossOrigin = 'anonymous';
-
-        videoElement.onloadeddata = () => {
-          const c = document.createElement('canvas');
-          const ctx = c.getContext('2d');
-          if (!ctx) return;
-
-          const scale = Math.min(1, 720 / Math.max(videoElement.videoWidth, videoElement.videoHeight));
-          c.width = videoElement.videoWidth * scale;
-          c.height = videoElement.videoHeight * scale;
-
-          const duration = videoElement.duration || 10;
-          let currentTime = 0;
-
-          const captureNext = () => {
-            videoElement.currentTime = currentTime;
-          };
-
-          videoElement.onseeked = () => {
-            if (!sessionRef.current) return;
-            ctx.drawImage(videoElement, 0, 0, c.width, c.height);
-            const base64Data = c.toDataURL('image/jpeg', 0.6);
-            const pureBase64 = base64Data.split(',')[1];
-
-            if (currentTime === 0) {
-              saveMessage('user', `[Attached video: ${safeName}]`, {
-                fileName: safeName,
-                fileType,
-                previewData: base64Data
-              });
-            }
-
-            sendVideoToLive(pureBase64);
-
-            currentTime += 1;
-            if (currentTime <= duration) {
-              setTimeout(captureNext, 200);
-            } else {
-              URL.revokeObjectURL(videoUrl);
-              sendTextToLive(`Finished sending video frames for ${safeName}.`);
-            }
-          };
-
-          captureNext();
-        };
-      } else {
-        saveMessage('user', `[Attached video: ${safeName}]`, { fileName: safeName, fileType });
-      }
-      return;
-    }
-
-    if (fileType.startsWith('audio/')) {
-      saveMessage('user', `[Attached audio: ${safeName}]`, {
-        fileName: safeName,
-        fileType,
-      });
-      updateLiveTranscript('user', `Attached audio: ${safeName}`, 3000);
-
-      if (sessionRef.current) {
-        sendTextToLive(`${settings.userName} uploaded an audio file: ${safeName}. Listen to it now.`);
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-          const audioCtx = new AudioCtx({ sampleRate: 16000 });
-          const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-          const pcmData = audioBuffer.getChannelData(0);
-
-          const chunkSize = 16000;
-          let offset = 0;
-
-          const sendNextChunk = () => {
-            if (!sessionRef.current || offset >= pcmData.length) return;
-
-            const end = Math.min(offset + chunkSize, pcmData.length);
-            const chunk = pcmData.slice(offset, end);
-            const int16Buffer = new Int16Array(chunk.length);
-            
-            for (let i = 0; i < chunk.length; i++) {
-              let s = Math.max(-1, Math.min(1, chunk[i]));
-              int16Buffer[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-            }
-
-            let binary = '';
-            const bytes = new Uint8Array(int16Buffer.buffer);
-            for (let i = 0; i < bytes.length; i++) {
-              binary += String.fromCharCode(bytes[i]);
-            }
-            const base64 = btoa(binary);
-
-            sendAudioToLive(base64);
-
-            offset += chunkSize;
-            setTimeout(sendNextChunk, 50);
-          };
-
-          sendNextChunk();
-        } catch (e) {
-          console.error('Audio processing error:', e);
-          sendTextToLive(`Failed to process audio file: ${safeName}`);
-        }
-      }
-      return;
-    }
-
-    if (
-      fileType.startsWith('text/') ||
-      fileType === 'application/json' ||
-      fileType === 'application/javascript' ||
-      file.name.endsWith('.js') ||
-      file.name.endsWith('.ts') ||
-      file.name.endsWith('.tsx') ||
-      file.name.endsWith('.jsx') ||
-      file.name.endsWith('.html') ||
-      file.name.endsWith('.css') ||
-      file.name.endsWith('.md')
-    ) {
-      const textContent = await file.text();
-
-      saveMessage('user', `[Attached code/text file: ${safeName}]`, {
-        fileName: safeName,
-        fileType,
-      });
-      updateLiveTranscript('user', `Attached text file: ${safeName}`, 3000);
-
-      if (sessionRef.current) {
-        const maxLen = 30000;
-        if (textContent.length > maxLen) {
-          sendTextToLive(`${settings.userName} uploaded a large text file named ${safeName}. Sending in chunks.`);
-          for (let i = 0; i < textContent.length; i += maxLen) {
-            const chunk = textContent.slice(i, i + maxLen);
-            sendTextToLive(`File: ${safeName} (Part ${Math.floor(i / maxLen) + 1}):\n\n${chunk}`);
-          }
-          sendTextToLive(`Finished sending file: ${safeName}.`);
-        } else {
-          sendTextToLive(`${settings.userName} uploaded a text file named ${safeName}. Content follows:\n\n${textContent}`);
-        }
-      }
-      return;
-    }
-
-    saveMessage('user', `[Attached file: ${safeName}]`, {
-      fileName: safeName,
-      fileType,
-    });
-    updateLiveTranscript('user', `Attached file: ${safeName}`, 3000);
-    
-    if (sessionRef.current) {
-      sendTextToLive(
-        `${settings.userName} attached a file named "${safeName}" with type "${fileType}". Acknowledge it normally, but state you cannot parse binary files of this type in real-time unless it's text, image, audio, or video.`
-      );
-    }
-  };
-
-  const stopSession = () => {
-    try { audioRecorderRef.current?.stop(); } catch (e) {}
-    try { audioStreamerRef.current?.stop(); } catch (e) {}
-    try { sessionRef.current?.close(); } catch (e) {}
-
-    stopMicVisualizer();
-
-    if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
-
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach((t) => t.stop());
-      videoRef.current.srcObject = null;
-    }
-
-    sessionRef.current = null;
-    modelTranscriptBufferRef.current = '';
-    userTranscriptBufferRef.current = '';
-    isActiveRef.current = false;
-
-    setIsVideoEnabled(false);
-    setIsActive(false);
-    setConnecting(false);
-    setIsAgentSpeaking(false);
-    setCurrentTranscript(null);
+  const sendChatMessage = (e?: FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = chatInput.trim();
+    if (!clean) return;
+    saveMessage('user', clean); updateLiveTranscript('user', clean, 3200);
+    if (sessionRef.current) sendTextToLive(clean);
+    else { const msg = `${settings.agentName} is not connected yet. Start the live session first.`; updateLiveTranscript('model', msg, 3400); saveMessage('model', msg); }
+    setChatInput('');
   };
 
   const persistSettings = async () => {
     const userRef = ref(rtdb, 'users/' + user.uid);
-
-    await update(userRef, {
-      displayName: settings.userName,
-      settings,
-      updatedAt: serverTimestamp(),
-    });
-
+    await update(userRef, { displayName: settings.userName, settings, updatedAt: serverTimestamp() });
     setShowProfile(false);
   };
 
+  // ---- Render ----
   return (
-    <div
-      className="relative flex h-[100dvh] min-h-screen flex-col overflow-hidden bg-[#020203] text-zinc-300 selection:bg-lime-300/30"
-      style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}
-    >
+    <div className="relative flex h-[100dvh] min-h-screen flex-col overflow-hidden bg-[#020203] text-zinc-300 selection:bg-lime-300/30" style={{ fontFamily:'Roboto, system-ui, sans-serif' }}>
       <canvas ref={canvasRef} className="hidden" />
+      <input ref={fileInputRef} type="file" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) handleAttachFile(file); e.target.value = ''; }} />
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleAttachFile(file);
-          e.target.value = '';
-        }}
-      />
-
+      {/* Video overlay */}
       <AnimatePresence>
         {isVideoEnabled && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 z-40 bg-black"
-          >
-            <video
-              ref={videoRef}
-              playsInline
-              muted
-              className={`h-full w-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
-            />
-
+          <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} className="absolute inset-0 z-40 bg-black">
+            <video ref={videoRef} playsInline muted className={`h-full w-full object-cover ${facingMode==='user'?'scale-x-[-1]':''}`} />
             <div className="absolute left-6 top-6 flex items-center gap-2 rounded-full border border-lime-300/20 bg-black/60 px-3 py-1.5 backdrop-blur-md">
               <span className="h-2 w-2 animate-pulse rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,242,100,0.9)]" />
               <span className="text-[9px] font-bold uppercase tracking-widest text-lime-200">Camera Live</span>
             </div>
-
             <div className="pointer-events-auto absolute bottom-8 left-1/2 flex -translate-x-1/2 items-center gap-4">
-              <button
-                onClick={switchCamera}
-                className="rounded-full border border-white/10 bg-black/60 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 backdrop-blur-xl transition hover:border-lime-300/40 hover:text-lime-200"
-              >
-                Flip Camera
-              </button>
-
-              <button
-                onClick={capturePhoto}
-                className="flex items-center gap-2 rounded-full border border-lime-300/30 bg-lime-300/15 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 backdrop-blur-xl transition hover:bg-lime-300/25"
-              >
-                <Camera className="h-4 w-4" /> Capture
-              </button>
-
-              <button
-                onClick={toggleVideo}
-                className="rounded-full border border-red-500/30 bg-red-500/15 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-red-300 backdrop-blur-xl transition hover:bg-red-500/25"
-              >
-                Close Camera
-              </button>
+              <button onClick={switchCamera} className="rounded-full border border-white/10 bg-black/60 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 backdrop-blur-xl transition hover:border-lime-300/40 hover:text-lime-200">Flip Camera</button>
+              <button onClick={capturePhoto} className="flex items-center gap-2 rounded-full border border-lime-300/30 bg-lime-300/15 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 backdrop-blur-xl transition hover:bg-lime-300/25"><Camera className="h-4 w-4" /> Capture</button>
+              <button onClick={toggleVideo} className="rounded-full border border-red-500/30 bg-red-500/15 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-red-300 backdrop-blur-xl transition hover:bg-red-500/25">Close Camera</button>
             </div>
-
             <AnimatePresence>
               {currentTranscript && (
-                <motion.div
-                  initial={{ opacity: 0, y: 14 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -12 }}
-                  className="pointer-events-none absolute left-1/2 top-[106px] z-50 w-[92vw] max-w-5xl -translate-x-1/2"
-                >
-                  <OneLineStreamingTranscript
-                    role={currentTranscript.role}
-                    text={currentTranscript.text}
-                    name={settings.agentName}
-                  />
+                <motion.div initial={{ opacity:0, y:14 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-12 }} className="pointer-events-none absolute left-1/2 top-[106px] z-50 w-[92vw] max-w-5xl -translate-x-1/2">
+                  <OneLineStreamingTranscript role={currentTranscript.role} text={currentTranscript.text} name={settings.agentName} />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -3326,48 +1943,31 @@ function BeatriceAgent({
         )}
       </AnimatePresence>
 
-      <header className={`z-50 flex items-center justify-between border-b border-white/5 bg-[#050505]/80 px-8 py-6 backdrop-blur-md ${isVideoEnabled ? 'pointer-events-none opacity-0' : ''}`}>
+      {/* Header */}
+      <header className={`z-50 flex items-center justify-between border-b border-white/5 bg-[#050505]/80 px-8 py-6 backdrop-blur-md ${isVideoEnabled?'pointer-events-none opacity-0':''}`}>
         <div className="flex items-center gap-4">
-          <button onClick={() => setShowSidebar(true)} className="-ml-2 rounded-xl border border-white/10 p-2 text-zinc-400 transition-all hover:bg-white/5 hover:text-white">
-            <Menu className="h-5 w-5" />
-          </button>
+          <button onClick={()=>setShowSidebar(true)} className="-ml-2 rounded-xl border border-white/10 p-2 text-zinc-400 transition-all hover:bg-white/5 hover:text-white"><Menu className="h-5 w-5" /></button>
           <div className="hidden items-center gap-3 sm:flex">
             <img src={EBURON_LOGO_URL} alt="Eburon" className="h-8 w-8 rounded-full object-cover" />
-            <div className="leading-none">
-              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-lime-200">{PRODUCT_BRAND}</p>
-              <p className="mt-1 text-[10px] text-zinc-600">{PRODUCT_FULL_NAME}</p>
-            </div>
+            <div className="leading-none"><p className="text-[10px] font-black uppercase tracking-[0.24em] text-lime-200">{PRODUCT_BRAND}</p><p className="mt-1 text-[10px] text-zinc-600">{PRODUCT_FULL_NAME}</p></div>
           </div>
         </div>
-
         <div className="pointer-events-none absolute left-1/2 flex -translate-x-1/2 items-center gap-2">
           {isActive && (
-            <span className={`rounded-full border px-3 py-1 text-[10px] uppercase tracking-[0.2em] ${
-              isAgentSpeaking ? 'border-lime-300/50 bg-lime-300/10 text-lime-300' : 'border-sky-400/50 bg-sky-400/10 text-sky-300'
-            }`}>
-              {isAgentSpeaking ? 'Speaking...' : 'Listening...'}
+            <span className={`rounded-full border px-3 py-1 text-[10px] uppercase tracking-[0.2em] ${isAgentSpeaking?'border-lime-300/50 bg-lime-300/10 text-lime-300':'border-sky-400/50 bg-sky-400/10 text-sky-300'}`}>
+              {isAgentSpeaking?'Speaking...':'Listening...'}
             </span>
           )}
         </div>
-
         <div className="flex items-center gap-6">
-          <div className="mr-2 hidden flex-col items-end sm:flex">
-            <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-600">Voice</span>
-            <span className="flex items-center gap-1.5 font-mono text-[10px] text-lime-300">
-              {selectedVoiceMeta.alias}
-            </span>
-          </div>
-
-          <button onClick={() => setShowProfile(true)} className="h-10 w-10 overflow-hidden rounded-full border border-white/10 transition-all hover:border-lime-300/50 focus:outline-none focus:ring-2 focus:ring-lime-300/50">
-            {settings.avatarUrl || user.photoURL ? (
-              <img src={settings.avatarUrl || user.photoURL || ''} alt="Profile" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center bg-zinc-800 font-bold">{settings.userName?.[0] || 'U'}</div>
-            )}
+          <div className="mr-2 hidden flex-col items-end sm:flex"><span className="text-[9px] font-bold uppercase tracking-widest text-zinc-600">Voice</span><span className="flex items-center gap-1.5 font-mono text-[10px] text-lime-300">{selectedVoiceMeta.alias}</span></div>
+          <button onClick={()=>setShowProfile(true)} className="h-10 w-10 overflow-hidden rounded-full border border-white/10 transition-all hover:border-lime-300/50 focus:outline-none focus:ring-2 focus:ring-lime-300/50">
+            {settings.avatarUrl || user.photoURL ? <img src={settings.avatarUrl || user.photoURL || ''} alt="Profile" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center bg-zinc-800 font-bold">{settings.userName?.[0]||'U'}</div>}
           </button>
         </div>
       </header>
 
+      {/* Main (orb + transcript + footer) */}
       {!isVideoEnabled && (
         <main className="pointer-events-none relative z-10 flex w-full flex-1 flex-col items-center justify-start p-8 pt-12">
           <div className="pointer-events-none absolute inset-0 z-[-1] -translate-y-20 overflow-hidden">
@@ -3376,27 +1976,11 @@ function BeatriceAgent({
             <div className="absolute bottom-0 left-1/2 top-0 w-px bg-gradient-to-b from-transparent via-lime-300/[0.04] to-transparent" />
             <div className="absolute left-0 right-0 top-1/2 h-px bg-gradient-to-r from-transparent via-lime-300/[0.04] to-transparent" />
           </div>
-
-          <LimeVoiceOrb
-            isActive={isActive}
-            isAgentSpeaking={isAgentSpeaking}
-            speakerLevel={speakerLevel}
-            speakerBands={speakerBands}
-          />
-
+          <LimeVoiceOrb isActive={isActive} isAgentSpeaking={isAgentSpeaking} speakerLevel={speakerLevel} speakerBands={speakerBands} />
           <AnimatePresence>
             {currentTranscript && (
-              <motion.div
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -12 }}
-                className="absolute left-1/2 top-[340px] z-50 w-[92vw] max-w-5xl -translate-x-1/2"
-              >
-                <OneLineStreamingTranscript
-                  role={currentTranscript.role}
-                  text={currentTranscript.text}
-                  name={settings.agentName}
-                />
+              <motion.div initial={{ opacity:0, y:14 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-12 }} className="absolute left-1/2 top-[340px] z-50 w-[92vw] max-w-5xl -translate-x-1/2">
+                <OneLineStreamingTranscript role={currentTranscript.role} text={currentTranscript.text} name={settings.agentName} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -3405,62 +1989,20 @@ function BeatriceAgent({
             <div className="mb-4 w-full max-w-md space-y-2 px-6">
               <AnimatePresence>
                 {tasks.map(task => (
-                  <motion.div
-                    key={task.id}
-                    layout
-                    initial={{ opacity: 0, x: -50, scale: 0.9 }}
-                    animate={{ opacity: 1, x: 0, scale: 1 }}
-                    exit={{ opacity: 0, x: 50, transition: { duration: 0.2 } }}
-                    className="flex items-center gap-4 rounded-xl border border-l-2 border-white/5 border-l-lime-300/50 bg-[#0A0A0B]/80 p-3 shadow-2xl backdrop-blur-xl"
-                  >
+                  <motion.div key={task.id} layout initial={{ opacity:0, x:-50, scale:0.9 }} animate={{ opacity:1, x:0, scale:1 }} exit={{ opacity:0, x:50, transition:{duration:0.2} }} className="flex items-center gap-4 rounded-xl border border-l-2 border-white/5 border-l-lime-300/50 bg-[#0A0A0B]/80 p-3 shadow-2xl backdrop-blur-xl">
                     <div className="relative shrink-0">
-                      {task.status === 'processing' ? (
-                        <Loader2 className="h-4 w-4 animate-spin text-lime-300" />
-                      ) : task.status === 'completed' ? (
-                        <div className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500">
-                          <Check className="h-2.5 w-2.5 text-black" strokeWidth={4} />
-                        </div>
-                      ) : (
-                        <div className="h-4 w-4 rounded-full bg-red-500" />
-                      )}
+                      {task.status==='processing' ? <Loader2 className="h-4 w-4 animate-spin text-lime-300" /> : task.status==='completed' ? <div className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500"><Check className="h-2.5 w-2.5 text-black" strokeWidth={4} /></div> : <div className="h-4 w-4 rounded-full bg-red-500" />}
                     </div>
-
                     <div className="min-w-0 flex-1">
-                      <div className="mb-0.5 flex items-center justify-between">
-                        <span className="text-[9px] font-bold uppercase tracking-widest text-lime-300">{task.serviceName}</span>
-                        <span className="font-mono text-[8px] text-zinc-600">{task.status.toUpperCase()}</span>
-                      </div>
+                      <div className="mb-0.5 flex items-center justify-between"><span className="text-[9px] font-bold uppercase tracking-widest text-lime-300">{task.serviceName}</span><span className="font-mono text-[8px] text-zinc-600">{task.status.toUpperCase()}</span></div>
                       <p className="truncate text-xs text-zinc-100">{task.action}</p>
-                      {task.result && (
-                        <motion.p
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          className="mt-1 text-[10px] leading-tight text-zinc-400"
-                        >
-                          {task.result}
-                        </motion.p>
-                      )}
+                      {task.result && <motion.p initial={{ opacity:0, height:0 }} animate={{ opacity:1, height:'auto' }} className="mt-1 text-[10px] leading-tight text-zinc-400">{task.result}</motion.p>}
                     </div>
-
                     {task.htmlPreviewData && task.htmlPreviewFilename && (
-                      <a
-                        href={task.htmlPreviewData}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
+                      <a href={task.htmlPreviewData} target="_blank" rel="noreferrer" className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"><ExternalLink className="h-4 w-4" /></a>
                     )}
-
                     {task.downloadData && task.downloadFilename && (
-                      <a
-                        href={task.downloadData}
-                        download={task.downloadFilename}
-                        className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"
-                      >
-                        <Download className="h-4 w-4" />
-                      </a>
+                      <a href={task.downloadData} download={task.downloadFilename} className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"><Download className="h-4 w-4" /></a>
                     )}
                   </motion.div>
                 ))}
@@ -3469,41 +2011,15 @@ function BeatriceAgent({
 
             <div className="pointer-events-auto flex flex-col items-center justify-center gap-4">
               <div className="flex items-center justify-center gap-8">
-                <button
-                  onClick={() => setIsMuted(p => !p)}
-                  className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${
-                    isMuted ? 'border-red-500/30 bg-red-500/10 text-red-500' : 'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'
-                  }`}
-                >
+                <button onClick={()=>setIsMuted(p=>!p)} className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${isMuted?'border-red-500/30 bg-red-500/10 text-red-500':'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'}`}>
                   {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
                 </button>
-
                 {!isActive ? (
-                  <StartIconMicVisualizer
-                    isActive={false}
-                    connecting={connecting}
-                    isMuted={isMuted}
-                    micLevel={0}
-                    micBands={micBands}
-                    onClick={startSession}
-                  />
+                  <StartIconMicVisualizer isActive={false} connecting={connecting} isMuted={isMuted} micLevel={0} micBands={micBands} onClick={startSession} />
                 ) : (
-                  <StartIconMicVisualizer
-                    isActive={true}
-                    connecting={connecting}
-                    isMuted={isMuted}
-                    micLevel={micLevel}
-                    micBands={micBands}
-                    onClick={stopSession}
-                  />
+                  <StartIconMicVisualizer isActive={true} connecting={connecting} isMuted={isMuted} micLevel={micLevel} micBands={micBands} onClick={stopSession} />
                 )}
-
-                <button
-                  onClick={() => toggleVideo()}
-                  className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${
-                    isVideoEnabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'
-                  }`}
-                >
+                <button onClick={toggleVideo} className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${isVideoEnabled?'border-emerald-500/30 bg-emerald-500/10 text-emerald-500':'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'}`}>
                   {isVideoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
                 </button>
               </div>
@@ -3512,151 +2028,63 @@ function BeatriceAgent({
         </main>
       )}
 
+      {/* Sidebar */}
       <AnimatePresence>
         {showSidebar && (
           <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowSidebar(false)}
-              className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed bottom-0 left-0 top-0 z-[101] flex w-96 max-w-[88vw] flex-col border-r border-white/10 bg-[#0A0A0B] shadow-2xl"
-            >
+            <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} onClick={()=>setShowSidebar(false)} className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm" />
+            <motion.div initial={{ x:'-100%' }} animate={{ x:0 }} exit={{ x:'-100%' }} transition={{ type:'spring', damping:25, stiffness:200 }} className="fixed bottom-0 left-0 top-0 z-[101] flex w-96 max-w-[88vw] flex-col border-r border-white/10 bg-[#0A0A0B] shadow-2xl">
               <div className="flex items-center justify-between border-b border-white/10 p-6">
-                <div>
-                  <h2 className="text-sm font-bold uppercase tracking-widest text-white">Office History</h2>
-                  <p className="mt-1 text-[10px] uppercase tracking-widest text-zinc-500">Saved conversation records</p>
-                </div>
-                <button onClick={() => setShowSidebar(false)} className="-mr-2 rounded-xl p-2 text-zinc-500 transition-colors hover:bg-white/5 hover:text-white">
-                  <X className="h-5 w-5" />
-                </button>
+                <div><h2 className="text-sm font-bold uppercase tracking-widest text-white">Office History</h2><p className="mt-1 text-[10px] uppercase tracking-widest text-zinc-500">Saved conversation records</p></div>
+                <button onClick={()=>setShowSidebar(false)} className="-mr-2 rounded-xl p-2 text-zinc-500 transition-colors hover:bg-white/5 hover:text-white"><X className="h-5 w-5" /></button>
               </div>
-
               <div className="grid grid-cols-2 gap-3 border-b border-white/10 p-4">
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-lime-300/20 bg-lime-300/10 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"
-                >
-                  <Paperclip className="h-4 w-4" />
-                  Attach
-                </button>
-
-                <button
-                  onClick={() => setChatInput('Build ')}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10"
-                >
-                  <Code2 className="h-4 w-4" />
-                  Build
-                </button>
+                <button onClick={()=>fileInputRef.current?.click()} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-lime-300/20 bg-lime-300/10 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"><Paperclip className="h-4 w-4" />Attach</button>
+                <button onClick={()=>setChatInput('Build ')} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10"><Code2 className="h-4 w-4" />Build</button>
               </div>
-
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="flex-1 space-y-3 overflow-y-auto p-4 pb-3">
                   {historyMsgs.map((msg, i) => (
-                    <div key={`${msg.timestamp}-${i}`} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                      <span className="mb-1 text-[8px] uppercase tracking-widest text-zinc-600">
-                        {msg.role === 'user' ? settings.userName : settings.agentName}
-                      </span>
-
-                      <div className={`max-w-[92%] rounded-2xl p-3 text-xs leading-relaxed ${
-                        msg.role === 'user'
-                          ? 'rounded-tr-sm border border-sky-400/20 bg-sky-400/10 text-sky-100'
-                          : 'rounded-tl-sm border border-lime-300/10 bg-white/5 text-zinc-300'
-                      }`}>
+                    <div key={`${msg.timestamp}-${i}`} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
+                      <span className="mb-1 text-[8px] uppercase tracking-widest text-zinc-600">{msg.role==='user'?settings.userName:settings.agentName}</span>
+                      <div className={`max-w-[92%] rounded-2xl p-3 text-xs leading-relaxed ${msg.role==='user'?'rounded-tr-sm border border-sky-400/20 bg-sky-400/10 text-sky-100':'rounded-tl-sm border border-lime-300/10 bg-white/5 text-zinc-300'}`}>
                         {msg.fileName && (
-                          <div className="mb-2 flex items-center gap-2 rounded-xl bg-black/30 px-2 py-1 text-[10px] text-lime-200">
-                            <Upload className="h-3 w-3" />
-                            {msg.fileName}
+                          <div className="mb-2 flex flex-col gap-2">
+                            <div className="flex items-center gap-2 rounded-xl bg-black/30 px-2 py-1 text-[10px] text-lime-200"><Upload className="h-3 w-3" />{msg.fileName}</div>
+                            {msg.downloadData && msg.downloadData.startsWith('data:image/') && (
+                              <div className="overflow-hidden rounded-xl border border-white/10"><img src={msg.downloadData} alt={msg.fileName} className="w-full max-h-40 object-cover" /></div>
+                            )}
+                            {msg.downloadData === 'audio' && (
+                              <div className="flex items-center gap-2 rounded-xl bg-black/30 px-3 py-2 text-[10px] text-zinc-400"><Mic className="h-4 w-4" />Audio file — played to agent</div>
+                            )}
+                            {msg.text && msg.fileType?.startsWith('text/') && (
+                              <div className="rounded-xl bg-black/20 p-2 text-[10px] font-mono text-zinc-300 max-h-24 overflow-hidden">{msg.text}</div>
+                            )}
                           </div>
                         )}
-                        
-                        {msg.previewData && (
-                          <img src={msg.previewData} alt="Attached" className="mb-2 mt-1 max-h-40 w-auto rounded-lg border border-white/10 object-contain shadow-sm" />
-                        )}
-
                         {msg.toolName && (
-                          <div className="mb-2 flex items-center gap-2 rounded-xl bg-lime-300/10 px-2 py-1 text-[10px] text-lime-200">
-                            <FileText className="h-3 w-3" />
-                            Tool Output: {msg.toolName}
-                          </div>
+                          <div className="mb-2 flex items-center gap-2 rounded-xl bg-lime-300/10 px-2 py-1 text-[10px] text-lime-200"><FileText className="h-3 w-3" />Tool Output: {msg.toolName}</div>
                         )}
-
                         {msg.text}
-
                         {msg.htmlPreviewData && msg.htmlPreviewFilename && (
                           <div className="mt-3 grid grid-cols-1 gap-2">
-                            <a
-                              href={msg.htmlPreviewData}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"
-                            >
-                              <ExternalLink className="h-3.5 w-3.5" />
-                              Open HTML Preview
-                            </a>
-
-                            <a
-                              href={msg.htmlPreviewData}
-                              download={msg.htmlPreviewFilename}
-                              className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10"
-                            >
-                              <Download className="h-3.5 w-3.5" />
-                              Download HTML
-                            </a>
+                            <a href={msg.htmlPreviewData} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"><ExternalLink className="h-3.5 w-3.5" />Open HTML Preview</a>
+                            <a href={msg.htmlPreviewData} download={msg.htmlPreviewFilename} className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10"><Download className="h-3.5 w-3.5" />Download HTML</a>
                           </div>
                         )}
-
                         {msg.downloadData && msg.downloadFilename && (
-                          <a
-                            href={msg.downloadData}
-                            download={msg.downloadFilename}
-                            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                            Download Result
-                          </a>
+                          <a href={msg.downloadData} download={msg.downloadFilename} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"><Download className="h-3.5 w-3.5" />Download Result</a>
                         )}
                       </div>
                     </div>
                   ))}
-
-                  {historyMsgs.length === 0 && (
-                    <div className="py-10 text-center text-[10px] font-bold uppercase tracking-widest text-zinc-600">
-                      No Office History Yet
-                    </div>
-                  )}
+                  {historyMsgs.length===0 && <div className="py-10 text-center text-[10px] font-bold uppercase tracking-widest text-zinc-600">No Office History Yet</div>}
                 </div>
-
-                <form
-                  onSubmit={sendChatMessage}
-                  className="border-t border-white/10 bg-[#070807]/95 p-3 backdrop-blur-xl"
-                >
+                <form onSubmit={sendChatMessage} className="border-t border-white/10 bg-[#070807]/95 p-3 backdrop-blur-xl">
                   <div className="flex items-center gap-2 rounded-2xl border border-lime-300/15 bg-black/45 p-2 shadow-2xl">
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-zinc-400 transition hover:border-lime-300/30 hover:text-lime-200"
-                    >
-                      <Paperclip className="h-4 w-4" />
-                    </button>
-
-                    <input
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                      placeholder={`Message ${settings.agentName}...`}
-                      className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm text-white outline-none placeholder:text-zinc-600"
-                      style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}
-                    />
-
-                    <button
-                      type="submit"
-                      disabled={!chatInput.trim()}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-lime-300 text-black transition hover:bg-lime-200 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <Send className="h-4 w-4" />
-                    </button>
+                    <button type="button" onClick={()=>fileInputRef.current?.click()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-zinc-400 transition hover:border-lime-300/30 hover:text-lime-200"><Paperclip className="h-4 w-4" /></button>
+                    <input value={chatInput} onChange={(e)=>setChatInput(e.target.value)} placeholder={`Message ${settings.agentName}...`} className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm text-white outline-none placeholder:text-zinc-600" />
+                    <button type="submit" disabled={!chatInput.trim()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-lime-300 text-black transition hover:bg-lime-200 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"><Send className="h-4 w-4" /></button>
                   </div>
                 </form>
               </div>
@@ -3665,140 +2093,54 @@ function BeatriceAgent({
         )}
       </AnimatePresence>
 
+      {/* Profile Modal */}
       <AnimatePresence>
         {showProfile && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
-            className="fixed inset-0 z-[200] flex flex-col overflow-y-auto bg-[#050505]"
-          >
+          <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:20 }} className="fixed inset-0 z-[200] flex flex-col overflow-y-auto bg-[#050505]">
             <div className="sticky top-0 z-10 mx-auto flex w-full max-w-2xl items-center justify-between border-b border-white/10 bg-[#050505]/80 p-6 backdrop-blur-xl">
               <h2 className="text-sm font-bold uppercase tracking-widest text-white">Office Profile</h2>
-
-              <button onClick={() => setShowProfile(false)} className="rounded-xl bg-white/5 p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white">
-                <X className="h-5 w-5" />
-              </button>
+              <button onClick={()=>setShowProfile(false)} className="rounded-xl bg-white/5 p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white"><X className="h-5 w-5" /></button>
             </div>
-
             <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 p-6 pb-32">
               <div className="flex flex-col items-center gap-4">
                 <div className="group relative flex h-32 w-32 items-center justify-center overflow-hidden rounded-full border-2 border-white/10 bg-zinc-900">
-                  {settings.avatarUrl || user.photoURL ? (
-                    <img src={settings.avatarUrl || user.photoURL || ''} alt="Avatar" className="h-full w-full object-cover transition-opacity group-hover:opacity-50" />
-                  ) : (
-                    <div className="text-4xl font-bold text-zinc-700">{settings.userName?.[0] || 'U'}</div>
-                  )}
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
-                    <Camera className="h-8 w-8 text-white drop-shadow-md" />
-                  </div>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="absolute inset-0 cursor-pointer opacity-0"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-
-                      const reader = new FileReader();
-
-                      reader.onload = (ev) => {
-                        const img = new Image();
-
-                        img.onload = () => {
-                          const c = document.createElement('canvas');
-                          c.width = 150;
-                          c.height = 150;
-
-                          const ctx = c.getContext('2d');
-                          if (!ctx) return;
-
-                          ctx.drawImage(img, 0, 0, 150, 150);
-                          setSettings(s => ({ ...s, avatarUrl: c.toDataURL('image/jpeg', 0.8) }));
-                        };
-
-                        img.src = ev.target?.result as string;
-                      };
-
-                      reader.readAsDataURL(file);
-                    }}
-                  />
+                  {settings.avatarUrl || user.photoURL ? <img src={settings.avatarUrl || user.photoURL || ''} alt="Avatar" className="h-full w-full object-cover transition-opacity group-hover:opacity-50" /> : <div className="text-4xl font-bold text-zinc-700">{settings.userName?.[0]||'U'}</div>}
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"><Camera className="h-8 w-8 text-white drop-shadow-md" /></div>
+                  <input type="file" accept="image/*" className="absolute inset-0 cursor-pointer opacity-0" onChange={(e)=>{
+                    const file = e.target.files?.[0]; if(!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'); c.width=150; c.height=150; const ctx=c.getContext('2d'); if(ctx){ ctx.drawImage(img,0,0,150,150); setSettings(s=>({...s, avatarUrl: c.toDataURL('image/jpeg',0.8)})); } }; img.src = ev.target?.result as string; };
+                    reader.readAsDataURL(file);
+                  }} />
                 </div>
-
-                <div className="text-center">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-300">Profile Photo</h3>
-                  <p className="mt-1 text-[10px] text-zinc-600">Tap to update</p>
-                </div>
+                <div className="text-center"><h3 className="text-xs font-bold uppercase tracking-widest text-zinc-300">Profile Photo</h3><p className="mt-1 text-[10px] text-zinc-600">Tap to update</p></div>
               </div>
-
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                    <UserRound className="h-3.5 w-3.5" />
-                    How should Beatrice address you?
-                  </label>
-                  <input
-                    type="text"
-                    value={settings.userName}
-                    onChange={(e) => setSettings(s => ({ ...s, userName: e.target.value }))}
-                    className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-xl font-medium text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
-                    placeholder="e.g. Jo Lernout"
-                  />
+                  <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500"><UserRound className="h-3.5 w-3.5" />How should Beatrice address you?</label>
+                  <input type="text" value={settings.userName} onChange={(e)=>setSettings(s=>({...s,userName:e.target.value}))} className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-xl font-medium text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50" placeholder="e.g. Jo Lernout" />
                 </div>
-
                 <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                    <Bot className="h-3.5 w-3.5" />
-                    Persona Name
-                  </label>
-                  <input
-                    type="text"
-                    value={settings.agentName}
-                    onChange={(e) => setSettings(s => ({ ...s, agentName: e.target.value }))}
-                    className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-xl font-medium text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
-                    placeholder="e.g. Beatrice"
-                  />
+                  <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500"><Bot className="h-3.5 w-3.5" />Persona Name</label>
+                  <input type="text" value={settings.agentName} onChange={(e)=>setSettings(s=>({...s,agentName:e.target.value}))} className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-xl font-medium text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50" placeholder="e.g. Beatrice" />
                 </div>
-
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Voice Alias</label>
-                  <select
-                    value={settings.selectedVoice}
-                    onChange={(e) => setSettings(s => ({ ...s, selectedVoice: e.target.value }))}
-                    className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-sm text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
-                  >
-                    {GEMINI_LIVE_VOICE_OPTIONS.map(v => (
-                      <option key={v.id} value={v.id}>
-                        {v.alias} — {v.vibe}
-                      </option>
-                    ))}
+                  <select value={settings.selectedVoice} onChange={(e)=>setSettings(s=>({...s,selectedVoice:e.target.value}))} className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-sm text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50">
+                    {GEMINI_LIVE_VOICE_OPTIONS.map(v=><option key={v.id} value={v.id}>{v.alias} — {v.vibe}</option>)}
                   </select>
                 </div>
-
                 <div className="flex flex-1 flex-col space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Default Persona Instructions</label>
-                  <textarea
-                    value={settings.personality}
-                    onChange={(e) => setSettings(s => ({ ...s, personality: e.target.value }))}
-                    className="min-h-[340px] w-full resize-y rounded-xl border border-white/10 bg-[#0A0A0B] p-4 font-mono text-xs leading-relaxed text-zinc-300 outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
-                    placeholder="Describe how the agent should behave..."
-                  />
-                  <p className="text-[10px] leading-relaxed text-zinc-600">
-                    The hidden office-behavior prompt stays applied behind this editable persona.
-                  </p>
+                  <textarea value={settings.personality} onChange={(e)=>setSettings(s=>({...s,personality:e.target.value}))} className="min-h-[340px] w-full resize-y rounded-xl border border-white/10 bg-[#0A0A0B] p-4 font-mono text-xs leading-relaxed text-zinc-300 outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50" placeholder="Describe how the agent should behave..." />
+                  <p className="text-[10px] leading-relaxed text-zinc-600">The hidden office-behavior prompt stays applied behind this editable persona.</p>
                 </div>
               </div>
             </div>
-
             <div className="fixed bottom-0 left-0 right-0 z-[220] border-t border-white/10 bg-[#050505]/90 p-4 backdrop-blur-xl">
               <div className="mx-auto flex w-full max-w-2xl gap-3">
-                <button onClick={onLogout} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-500/10 px-4 py-3 text-xs font-bold uppercase tracking-widest text-red-500 transition-all hover:bg-red-500/20 active:scale-95">
-                  <LogOut className="h-4 w-4" /> Logout
-                </button>
-                <button
-                  onClick={persistSettings}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-lime-300 px-4 py-3 text-xs font-bold uppercase tracking-widest text-black transition-all hover:bg-lime-200 active:scale-95"
-                >
-                  <Save className="h-4 w-4" /> Save
-                </button>
+                <button onClick={onLogout} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-500/10 px-4 py-3 text-xs font-bold uppercase tracking-widest text-red-500 transition-all hover:bg-red-500/20 active:scale-95"><LogOut className="h-4 w-4" /> Logout</button>
+                <button onClick={persistSettings} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-lime-300 px-4 py-3 text-xs font-bold uppercase tracking-widest text-black transition-all hover:bg-lime-200 active:scale-95"><Save className="h-4 w-4" /> Save</button>
               </div>
             </div>
           </motion.div>
