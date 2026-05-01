@@ -53,29 +53,24 @@ import {
   Send,
   ExternalLink,
   Code2,
-  Image as ImageIcon,
-  Music,
-  Film,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
+// ---------- Type definitions ----------
 interface ChatMessage {
   role: 'user' | 'model';
   text: string;
   timestamp: number;
-  streaming?: boolean;
   fileName?: string;
   fileType?: string;
-  fileSize?: number;
-  fileKind?: 'image' | 'audio' | 'video' | 'text' | 'document' | 'other';
-  filePreviewData?: string;
-  fileDownloadData?: string;
   toolName?: string;
   toolResult?: any;
   downloadData?: string;
   downloadFilename?: string;
   htmlPreviewData?: string;
   htmlPreviewFilename?: string;
+  previewUrl?: string;
+  previewText?: string;
 }
 
 interface ActionTask {
@@ -98,13 +93,13 @@ interface AgentSettings {
   selectedVoice: string;
 }
 
+// ---------- Constants ----------
 const LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 const EBURON_LOGO_URL = 'https://eburon.ai/icon-eburon.svg';
 const PRODUCT_BRAND = 'VEP';
 const PRODUCT_FULL_NAME = 'Virtual Employee Persona';
-const MAX_STORED_FILE_PREVIEW_BYTES = 7 * 1024 * 1024;
 
-const GEMINI_LIVE_VOICE_OPTIONS = [
+const GEMINI_LIVE_VOICE_OPTIONS =[
   { alias: 'Superman', id: 'Charon', vibe: 'deep, steady, grounded' },
   { alias: 'Wonder Woman', id: 'Kore', vibe: 'clear, composed, warm' },
   { alias: 'Batman', id: 'Fenrir', vibe: 'dark, firm, serious' },
@@ -199,7 +194,25 @@ const DEFAULT_SETTINGS: AgentSettings = {
   selectedVoice: 'Kore',
 };
 
-const GOOGLE_SERVICE_TOOLS = [
+const LIVE_RUNTIME = {
+  generation: 0,
+  ownerId: '',
+  startPromise: null as Promise<boolean> | null,
+  session: null as any,
+  audioRecorder: null as AudioRecorder | null,
+  audioStreamer: null as AudioStreamer | null,
+  isClosing: false,
+  visStream: null as MediaStream | null,
+  visCtx: null as AudioContext | null,
+  visAnalyser: null as AnalyserNode | null,
+};
+
+function isClosedSocketError(error: any) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return message.includes('closing') || message.includes('closed') || message.includes('websocket');
+}
+
+const GOOGLE_SERVICE_TOOLS =[
   {
     name: 'render_web_artifact',
     description:
@@ -250,7 +263,7 @@ const GOOGLE_SERVICE_TOOLS = [
         saveToDrive: { type: Type.BOOLEAN, description: 'If true, upload the HTML document to the user drive.' },
         emailTo: { type: Type.STRING, description: 'Optional email address to send the HTML document to. Use current_user if requested.' },
       },
-      required: ['title', 'html'],
+      required:['title', 'html'],
     },
   },
   {
@@ -263,7 +276,7 @@ const GOOGLE_SERVICE_TOOLS = [
         query: { type: Type.STRING, description: 'Mail search query, sender, subject, or keyword.' },
         limit: { type: Type.NUMBER, description: 'Maximum number of messages to fetch.' },
       },
-      required: [],
+      required:[],
     },
   },
   {
@@ -306,7 +319,7 @@ const GOOGLE_SERVICE_TOOLS = [
         timeMin: { type: Type.STRING, description: 'Optional start datetime.' },
         timeMax: { type: Type.STRING, description: 'Optional end datetime.' },
       },
-      required: [],
+      required:[],
     },
   },
   {
@@ -340,7 +353,7 @@ const GOOGLE_SERVICE_TOOLS = [
         location: { type: Type.STRING, description: 'New event location.' },
         description: { type: Type.STRING, description: 'New event description.' },
       },
-      required: [],
+      required:[],
     },
   },
   {
@@ -366,7 +379,7 @@ const GOOGLE_SERVICE_TOOLS = [
         fileName: { type: Type.STRING, description: 'File name or search term if id is unknown.' },
         exportMimeType: { type: Type.STRING, description: 'Optional export MIME type, e.g. application/pdf or text/plain.' },
       },
-      required: [],
+      required:[],
     },
   },
   {
@@ -421,7 +434,7 @@ const GOOGLE_SERVICE_TOOLS = [
         range: { type: Type.STRING, description: 'Sheet range, for example Sheet1!A1:D10.' },
         query: { type: Type.STRING, description: 'File name or search query if id unknown.' },
       },
-      required: [],
+      required:[],
     },
   },
   {
@@ -457,7 +470,7 @@ const GOOGLE_SERVICE_TOOLS = [
       properties: {
         listId: { type: Type.STRING, description: 'Optional task list id, defaults to @default.' },
       },
-      required: [],
+      required:[],
     },
   },
   {
@@ -569,6 +582,7 @@ const GOOGLE_SERVICE_TOOLS = [
   },
 ];
 
+// ---------- Utility functions ----------
 function safeJsonStringify(value: any) {
   try {
     return JSON.stringify(value, null, 2);
@@ -613,8 +627,10 @@ body{font-family:Arial,sans-serif;background:#111;color:#fff;display:grid;place-
   }
 
   if (trimmed.toLowerCase().startsWith('<!doctype html')) return trimmed;
-  if (trimmed.toLowerCase().startsWith('<html')) return `<!DOCTYPE html>
-${trimmed}`;
+
+  if (trimmed.toLowerCase().startsWith('<html')) {
+    return `<!DOCTYPE html>\n${trimmed}`;
+  }
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -658,30 +674,37 @@ function makeBlobDownloadData(blob: Blob): Promise<string> {
   });
 }
 
-function stringToBase64(value: string): string {
+function utf8ToBase64(value: string) {
   const bytes = new TextEncoder().encode(value);
   let binary = '';
-  bytes.forEach(byte => {
-    binary += String.fromCharCode(byte);
-  });
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
   return btoa(binary);
 }
 
-function splitBase64ForMime(base64: string): string {
-  const chunkSize = 76;
-  const chunks: string[] = [];
-  for (let i = 0; i < base64.length; i += chunkSize) {
-    chunks.push(base64.substring(i, i + chunkSize));
-  }
-  return chunks.join('
-');
-}
-
 function base64UrlEncode(value: string) {
-  return stringToBase64(value).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  return utf8ToBase64(value)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
+function sanitizeEmailHeader(value: string) {
+  return String(value || '').replace(/[\r\n]+/g, ' ').trim();
+}
+
+function encodeEmailSubject(value: string) {
+  const clean = sanitizeEmailHeader(value);
+  if (/^[\x00-\x7F]*$/.test(clean)) return clean;
+  return `=?UTF-8?B?${utf8ToBase64(clean)}?=`;
+}
+
+function chunkBase64(value: string) {
+  return String(value || '').replace(/.{1,76}/g, '$&\r\n').trim();
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
   for (let i = 0; i < bytes.byteLength; i++) {
@@ -690,15 +713,74 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-function sanitizeEmailHeader(value: string) {
-  return String(value || '').replace(/[
-]+/g, ' ').trim();
-}
-
-function encodeEmailSubject(value: string) {
-  const clean = sanitizeEmailHeader(value);
-  if (/^[ -]*$/.test(clean)) return clean;
-  return `=?UTF-8?B?${stringToBase64(clean)}?=`;
+async function generateFileThumbnail(file: File, type: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (type.startsWith('image/')) {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        let { width: w, height: h } = img;
+        const max = 512;
+        if (w > max || h > max) {
+          const r = Math.min(max / w, max / h);
+          w = Math.round(w * r);
+          h = Math.round(h * r);
+        }
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+        ctx?.drawImage(img, 0, 0, w, h);
+        resolve(c.toDataURL('image/jpeg', 0.7));
+        URL.revokeObjectURL(url);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      };
+      img.src = url;
+    } else if (type.startsWith('video/')) {
+      const url = URL.createObjectURL(file);
+      const video = document.createElement('video');
+      video.src = url;
+      video.muted = true;
+      video.playsInline = true;
+      video.currentTime = 1;
+      
+      const handleSeek = () => {
+        const c = document.createElement('canvas');
+        let { videoWidth: w, videoHeight: h } = video;
+        if (w === 0 || h === 0) {
+          resolve(null);
+          URL.revokeObjectURL(url);
+          return;
+        }
+        const max = 512;
+        if (w > max || h > max) {
+          const r = Math.min(max / w, max / h);
+          w = Math.round(w * r);
+          h = Math.round(h * r);
+        }
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+        ctx?.drawImage(video, 0, 0, w, h);
+        resolve(c.toDataURL('image/jpeg', 0.7));
+        URL.revokeObjectURL(url);
+      };
+      
+      video.onloadeddata = () => {
+         if (video.duration > 0 && video.duration < 1) {
+            video.currentTime = video.duration / 2;
+         }
+      };
+      video.onseeked = handleSeek;
+      video.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      };
+    } else {
+      resolve(null);
+    }
+  });
 }
 
 function buildEmailRaw({
@@ -720,7 +802,9 @@ function buildEmailRaw({
     base64Content: string;
   };
 }) {
-  const headers = [
+  const attachmentBase64Lines = attachment ? chunkBase64(attachment.base64Content) : '';
+
+  const headers =[
     `To: ${sanitizeEmailHeader(to)}`,
     cc ? `Cc: ${sanitizeEmailHeader(cc)}` : '',
     bcc ? `Bcc: ${sanitizeEmailHeader(bcc)}` : '',
@@ -729,22 +813,20 @@ function buildEmailRaw({
   ].filter(Boolean);
 
   if (!attachment) {
-    const raw = [
+    const raw =[
       ...headers,
       'Content-Type: text/plain; charset="UTF-8"',
       'Content-Transfer-Encoding: 8bit',
       '',
       body,
-    ].join('
-');
+    ].join('\r\n');
 
     return base64UrlEncode(raw);
   }
 
-  const boundary = `boundary_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const safeFilename = sanitizeEmailHeader(attachment.filename || 'attachment');
+  const boundary = `boundary_${Date.now()}`;
 
-  const raw = [
+  const raw =[
     ...headers,
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     '',
@@ -755,15 +837,14 @@ function buildEmailRaw({
     body,
     '',
     `--${boundary}`,
-    `Content-Type: ${attachment.mimeType || 'application/octet-stream'}; name="${safeFilename}"`,
+    `Content-Type: ${attachment.mimeType}; name="${sanitizeEmailHeader(attachment.filename)}"`,
     'Content-Transfer-Encoding: base64',
-    `Content-Disposition: attachment; filename="${safeFilename}"`,
+    `Content-Disposition: attachment; filename="${sanitizeEmailHeader(attachment.filename)}"`,
     '',
-    splitBase64ForMime(attachment.base64Content),
+    attachmentBase64Lines,
     '',
     `--${boundary}--`,
-  ].join('
-');
+  ].join('\r\n');
 
   return base64UrlEncode(raw);
 }
@@ -858,200 +939,7 @@ Note:
 This draft is generated for convenience and should be reviewed by a qualified legal professional before signing.`;
 }
 
-function getFileKind(file: File): ChatMessage['fileKind'] {
-  const type = file.type || '';
-  const name = file.name.toLowerCase();
-
-  if (type.startsWith('image/')) return 'image';
-  if (type.startsWith('audio/')) return 'audio';
-  if (type.startsWith('video/')) return 'video';
-  if (type.startsWith('text/')) return 'text';
-  if (/\.(txt|md|json|csv|html|css|js|jsx|ts|tsx|py|xml|yaml|yml|log)$/i.test(name)) return 'text';
-  if (/\.(pdf|doc|docx|ppt|pptx|xls|xlsx)$/i.test(name)) return 'document';
-
-  return 'other';
-}
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-async function fileToBase64(file: File): Promise<string> {
-  const dataUrl = await fileToDataUrl(file);
-  return dataUrl.split(',')[1] || '';
-}
-
-async function readTextFile(file: File, maxChars = 40000) {
-  const text = await file.text();
-  return text.slice(0, maxChars);
-}
-
-function delay(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function floatToPcm16Base64(samples: Float32Array) {
-  const buffer = new ArrayBuffer(samples.length * 2);
-  const view = new DataView(buffer);
-
-  for (let i = 0; i < samples.length; i++) {
-    const s = Math.max(-1, Math.min(1, samples[i]));
-    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-  }
-
-  return arrayBufferToBase64(buffer);
-}
-
-function downsampleAudioBuffer(buffer: AudioBuffer, targetSampleRate = 16000) {
-  const channels = buffer.numberOfChannels;
-  const inputSampleRate = buffer.sampleRate;
-  const inputLength = buffer.length;
-  const outputLength = Math.floor(inputLength * targetSampleRate / inputSampleRate);
-  const output = new Float32Array(outputLength);
-
-  for (let i = 0; i < outputLength; i++) {
-    const inputIndex = Math.min(inputLength - 1, Math.floor(i * inputSampleRate / targetSampleRate));
-    let sample = 0;
-
-    for (let channel = 0; channel < channels; channel++) {
-      sample += buffer.getChannelData(channel)[inputIndex] || 0;
-    }
-
-    output[i] = sample / Math.max(channels, 1);
-  }
-
-  return output;
-}
-
-async function decodeAudioFileToPcm16Chunks(file: File, chunkSeconds = 0.5) {
-  const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
-  if (!AudioContextClass) return [];
-
-  const context = new AudioContextClass();
-  const arrayBuffer = await file.arrayBuffer();
-  const audioBuffer = await context.decodeAudioData(arrayBuffer.slice(0));
-  const samples = downsampleAudioBuffer(audioBuffer, 16000);
-  const chunkSize = Math.max(1, Math.floor(16000 * chunkSeconds));
-  const chunks: string[] = [];
-
-  for (let i = 0; i < samples.length; i += chunkSize) {
-    chunks.push(floatToPcm16Base64(samples.slice(i, i + chunkSize)));
-  }
-
-  try {
-    await context.close();
-  } catch (e) {}
-
-  return chunks;
-}
-
-async function sampleVideoFrames(file: File, count = 6): Promise<string[]> {
-  const url = URL.createObjectURL(file);
-
-  try {
-    const video = document.createElement('video');
-    video.src = url;
-    video.muted = true;
-    video.playsInline = true;
-    video.crossOrigin = 'anonymous';
-
-    await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new Error('Could not load video metadata.'));
-    });
-
-    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 1;
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const frames: string[] = [];
-
-    if (!ctx) return frames;
-
-    for (let i = 0; i < count; i++) {
-      const time = Math.min(duration - 0.05, Math.max(0, duration * ((i + 1) / (count + 1))));
-
-      await new Promise<void>((resolve) => {
-        const done = () => resolve();
-        video.onseeked = done;
-        video.currentTime = time;
-      });
-
-      canvas.width = Math.max(1, video.videoWidth || 1280);
-      canvas.height = Math.max(1, video.videoHeight || 720);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      frames.push(canvas.toDataURL('image/jpeg', 0.62).split(',')[1] || '');
-      await delay(80);
-    }
-
-    return frames.filter(Boolean);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-function isClosedSocketError(error: any) {
-  const message = String(error?.message || error || '').toLowerCase();
-  return message.includes('closing') || message.includes('closed') || message.includes('websocket');
-}
-
-function formatFileSize(bytes?: number) {
-  if (!bytes) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function AttachmentIcon({ kind }: { kind?: ChatMessage['fileKind'] }) {
-  if (kind === 'image') return <ImageIcon className="h-3.5 w-3.5" />;
-  if (kind === 'audio') return <Music className="h-3.5 w-3.5" />;
-  if (kind === 'video') return <Film className="h-3.5 w-3.5" />;
-  return <Upload className="h-3.5 w-3.5" />;
-}
-
-function ChatAttachmentPreview({ msg }: { msg: ChatMessage }) {
-  if (!msg.fileName) return null;
-
-  return (
-    <div className="mb-2 overflow-hidden rounded-xl border border-white/10 bg-black/30">
-      <div className="flex items-center gap-2 px-2 py-1.5 text-[10px] text-lime-200">
-        <AttachmentIcon kind={msg.fileKind} />
-        <span className="min-w-0 flex-1 truncate">{msg.fileName}</span>
-        {msg.fileSize && <span className="shrink-0 text-zinc-500">{formatFileSize(msg.fileSize)}</span>}
-      </div>
-
-      {msg.filePreviewData && msg.fileKind === 'image' && (
-        <img src={msg.filePreviewData} alt={msg.fileName} className="max-h-48 w-full object-cover" />
-      )}
-
-      {msg.filePreviewData && msg.fileKind === 'audio' && (
-        <div className="px-2 pb-2">
-          <audio src={msg.filePreviewData} controls className="w-full" />
-        </div>
-      )}
-
-      {msg.filePreviewData && msg.fileKind === 'video' && (
-        <video src={msg.filePreviewData} controls playsInline className="max-h-56 w-full bg-black" />
-      )}
-
-      {msg.fileDownloadData && (
-        <a
-          href={msg.fileDownloadData}
-          download={msg.fileName}
-          className="flex w-full items-center justify-center gap-2 border-t border-white/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/10"
-        >
-          <Download className="h-3.5 w-3.5" />
-          Download file
-        </a>
-      )}
-    </div>
-  );
-}
-
+// ---------- Visual components ----------
 function OneLineStreamingTranscript({
   text,
   role,
@@ -1116,7 +1004,7 @@ function LimeVoiceOrb({
     bandsRef.current = speakerBands;
     activeRef.current = isActive;
     speakingRef.current = isAgentSpeaking;
-  }, [isActive, isAgentSpeaking, speakerBands, speakerLevel]);
+  },[isActive, isAgentSpeaking, speakerBands, speakerLevel]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1146,7 +1034,7 @@ function LimeVoiceOrb({
 
     const makeOrbPath = (cx: number, cy: number, radius: number, pulse: number, time: number) => {
       const path = new Path2D();
-      const points: Array<{ x: number; y: number }> = [];
+      const points: Array<{ x: number; y: number }> =[];
       const bands = bandsRef.current.length ? bandsRef.current : Array(20).fill(0);
       const live = activeRef.current && speakingRef.current;
       const count = 112;
@@ -1239,9 +1127,27 @@ function LimeVoiceOrb({
       ctx.save();
       ctx.clip(orbPath);
       ctx.globalCompositeOperation = 'screen';
-      drawGlow(cx - 38 + Math.sin(time * 0.7) * 12, cy - 34 + Math.cos(time * 0.55) * 10, 78 + pulse * 12, 'rgba(236,252,203,0.52)', 'rgba(236,252,203,0)');
-      drawGlow(cx + 40 + Math.cos(time * 0.62) * 14, cy + 24 + Math.sin(time * 0.75) * 12, 90 + pulse * 18, 'rgba(16,185,129,0.44)', 'rgba(16,185,129,0)');
-      drawGlow(cx - 6 + Math.sin(time * 0.5) * 18, cy + 34 + Math.cos(time * 0.46) * 10, 98, 'rgba(132,204,22,0.22)', 'rgba(132,204,22,0)');
+      drawGlow(
+        cx - 38 + Math.sin(time * 0.7) * 12,
+        cy - 34 + Math.cos(time * 0.55) * 10,
+        78 + pulse * 12,
+        'rgba(236,252,203,0.52)',
+        'rgba(236,252,203,0)'
+      );
+      drawGlow(
+        cx + 40 + Math.cos(time * 0.62) * 14,
+        cy + 24 + Math.sin(time * 0.75) * 12,
+        90 + pulse * 18,
+        'rgba(16,185,129,0.44)',
+        'rgba(16,185,129,0)'
+      );
+      drawGlow(
+        cx - 6 + Math.sin(time * 0.5) * 18,
+        cy + 34 + Math.cos(time * 0.46) * 10,
+        98,
+        'rgba(132,204,22,0.22)',
+        'rgba(132,204,22,0)'
+      );
       ctx.restore();
 
       ctx.save();
@@ -1264,7 +1170,7 @@ function LimeVoiceOrb({
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  },[]);
 
   return (
     <div className="relative flex h-72 w-72 items-center justify-center">
@@ -1290,7 +1196,7 @@ function StartIconMicVisualizer({
 }) {
   const innerBands = micBands?.length
     ? micBands.slice(5, 14)
-    : [0.35, 0.5, 0.72, 0.9, 1, 0.82, 0.64, 0.46, 0.32].map(n => n * micLevel);
+    :[0.35, 0.5, 0.72, 0.9, 1, 0.82, 0.64, 0.46, 0.32].map(n => n * micLevel);
 
   return (
     <button
@@ -1300,9 +1206,13 @@ function StartIconMicVisualizer({
       className="group relative flex h-20 w-20 items-center justify-center"
     >
       <motion.div
-        animate={{ opacity: isActive ? 0.16 + micLevel * 0.3 : 0.08 }}
+        animate={{
+          opacity: isActive ? 0.16 + micLevel * 0.3 : 0.08,
+        }}
         transition={{ duration: 0.045 }}
-        className={`absolute inset-0 rounded-full ${isMuted ? 'bg-red-500/20' : 'bg-lime-300/30'}`}
+        className={`absolute inset-0 rounded-full ${
+          isMuted ? 'bg-red-500/20' : 'bg-lime-300/30'
+        }`}
       />
 
       <div
@@ -1348,6 +1258,7 @@ function StartIconMicVisualizer({
   );
 }
 
+// ---------- App component (auth + main agent) ----------
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1357,9 +1268,9 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authConfirmPassword, setAuthConfirmPassword] = useState('');
-  const [authBusy, setAuthBusy] = useState(false);
+  const[authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState<{ type: 'error' | 'success' | 'info'; text: string } | null>(null);
-  const [showAuthPassword, setShowAuthPassword] = useState(false);
+  const[showAuthPassword, setShowAuthPassword] = useState(false);
   const [showAuthConfirmPassword, setShowAuthConfirmPassword] = useState(false);
 
   useEffect(() => {
@@ -1372,7 +1283,7 @@ export default function App() {
       link.href = 'https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap';
       document.head.appendChild(link);
     }
-  }, []);
+  },[]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -1429,7 +1340,7 @@ export default function App() {
     });
 
     return () => unsub();
-  }, []);
+  },[]);
 
   const getAuthErrorMessage = (error: any) => {
     const code = String(error?.code || '');
@@ -1479,7 +1390,7 @@ export default function App() {
       console.error(error);
 
       if (error && error.message && error.message.includes('missing initial state')) {
-        setAuthMessage({ type: 'error', text: 'Authentication failed due to browser privacy settings. Open the app in a new tab and try again.' });
+        setAuthMessage({ type: 'error', text: "Authentication failed due to browser privacy settings. Open the app in a new tab and try again." });
       } else {
         setAuthMessage({ type: 'error', text: getAuthErrorMessage(error) });
       }
@@ -1495,10 +1406,13 @@ export default function App() {
 
     const email = authEmail.trim();
     const password = authPassword;
+    const confirmPassword = authConfirmPassword;
     const fullName = authName.trim();
 
     try {
-      if (!email) throw new Error('Enter your email address.');
+      if (!email) {
+        throw new Error('Enter your email address.');
+      }
 
       if (authMode === 'reset') {
         await sendPasswordResetEmail(auth, email);
@@ -1507,12 +1421,22 @@ export default function App() {
         return;
       }
 
-      if (!password) throw new Error('Enter your password.');
+      if (!password) {
+        throw new Error('Enter your password.');
+      }
 
       if (authMode === 'signup') {
-        if (!fullName) throw new Error('Enter your full name.');
-        if (password.length < 6) throw new Error('Use at least 6 characters for the password.');
-        if (password !== authConfirmPassword) throw new Error('Passwords do not match.');
+        if (!fullName) {
+          throw new Error('Enter your full name.');
+        }
+
+        if (password.length < 6) {
+          throw new Error('Use at least 6 characters for the password.');
+        }
+
+        if (password !== confirmPassword) {
+          throw new Error('Passwords do not match.');
+        }
 
         const result = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(result.user, { displayName: fullName });
@@ -1557,7 +1481,10 @@ export default function App() {
         : 'Login to your account';
 
     return (
-      <div className="relative min-h-[100dvh] overflow-hidden bg-[#050505] text-white" style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}>
+      <div
+        className="relative min-h-[100dvh] overflow-hidden bg-[#050505] text-white"
+        style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}
+      >
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(190,242,100,0.13),transparent_34%),linear-gradient(180deg,#050505,#020302)]" />
         <div
           className="pointer-events-none absolute inset-0 opacity-[0.04]"
@@ -1582,24 +1509,56 @@ export default function App() {
               {isSignUp && (
                 <label className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 focus-within:border-lime-300/40">
                   <UserRound className="h-4 w-4 shrink-0 text-zinc-500" />
-                  <input value={authName} onChange={(e) => setAuthName(e.target.value)} placeholder="Full name" autoComplete="name" className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600" />
+                  <input
+                    value={authName}
+                    onChange={(e) => setAuthName(e.target.value)}
+                    placeholder="Full name"
+                    autoComplete="name"
+                    className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600"
+                  />
                 </label>
               )}
 
               <label className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 focus-within:border-lime-300/40">
                 <Mail className="h-4 w-4 shrink-0 text-zinc-500" />
-                <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} type="email" placeholder="Email" autoComplete="email" className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600" />
+                <input
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  type="email"
+                  placeholder="Email"
+                  autoComplete="email"
+                  className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600"
+                />
               </label>
 
               {!isReset && (
                 <label className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 focus-within:border-lime-300/40">
                   <LockKeyhole className="h-4 w-4 shrink-0 text-zinc-500" />
-                  <input value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} type={showAuthPassword ? 'text' : 'password'} placeholder="Password" autoComplete={isSignUp ? 'new-password' : 'current-password'} className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600" />
-                  <button type="button" onClick={() => setShowAuthPassword(value => !value)} aria-label={showAuthPassword ? 'Hide password' : 'Show password'} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200">
+                  <input
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    type={showAuthPassword ? 'text' : 'password'}
+                    placeholder="Password"
+                    autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                    className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthPassword(value => !value)}
+                    aria-label={showAuthPassword ? 'Hide password' : 'Show password'}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
+                  >
                     {showAuthPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                   {!isSignUp && (
-                    <button type="button" onClick={() => { setAuthMode('reset'); setAuthMessage(null); }} className="text-xs font-bold text-lime-200">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode('reset');
+                        setAuthMessage(null);
+                      }}
+                      className="text-xs font-bold text-lime-200"
+                    >
                       Forgot?
                     </button>
                   )}
@@ -1609,8 +1568,20 @@ export default function App() {
               {isSignUp && (
                 <label className="flex h-14 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 focus-within:border-lime-300/40">
                   <LockKeyhole className="h-4 w-4 shrink-0 text-zinc-500" />
-                  <input value={authConfirmPassword} onChange={(e) => setAuthConfirmPassword(e.target.value)} type={showAuthConfirmPassword ? 'text' : 'password'} placeholder="Confirm password" autoComplete="new-password" className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600" />
-                  <button type="button" onClick={() => setShowAuthConfirmPassword(value => !value)} aria-label={showAuthConfirmPassword ? 'Hide confirm password' : 'Show confirm password'} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200">
+                  <input
+                    value={authConfirmPassword}
+                    onChange={(e) => setAuthConfirmPassword(e.target.value)}
+                    type={showAuthConfirmPassword ? 'text' : 'password'}
+                    placeholder="Confirm password"
+                    autoComplete="new-password"
+                    className="min-w-0 flex-1 bg-transparent text-sm font-medium text-white outline-none placeholder:text-zinc-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthConfirmPassword(value => !value)}
+                    aria-label={showAuthConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
+                  >
                     {showAuthConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </label>
@@ -1628,7 +1599,11 @@ export default function App() {
                 </div>
               )}
 
-              <button type="submit" disabled={authBusy} className="mt-7 flex h-14 w-full items-center justify-center rounded-full bg-lime-300 text-sm font-bold text-black shadow-[0_18px_48px_rgba(190,242,100,0.18)] transition active:scale-[0.985] disabled:opacity-60">
+              <button
+                type="submit"
+                disabled={authBusy}
+                className="mt-7 flex h-14 w-full items-center justify-center rounded-full bg-lime-300 text-sm font-bold text-black shadow-[0_18px_48px_rgba(190,242,100,0.18)] transition active:scale-[0.985] disabled:opacity-60"
+              >
                 {authBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : isReset ? 'Send reset link' : isSignUp ? 'Sign up' : 'Sign in'}
               </button>
 
@@ -1640,18 +1615,31 @@ export default function App() {
                     <div className="h-px flex-1 bg-white/10" />
                   </div>
 
-                  <button type="button" onClick={handleGoogleLogin} disabled={authBusy} className="flex h-14 w-full items-center justify-center gap-3 rounded-full border border-white/10 bg-white/[0.06] px-5 text-sm font-bold text-zinc-100 transition hover:border-lime-300/30 hover:bg-lime-300/10 active:scale-[0.985] disabled:opacity-60">
+                  <button
+                    type="button"
+                    onClick={handleGoogleLogin}
+                    disabled={authBusy}
+                    className="flex h-14 w-full items-center justify-center gap-3 rounded-full border border-white/10 bg-white/[0.06] px-5 text-sm font-bold text-zinc-100 transition hover:border-lime-300/30 hover:bg-lime-300/10 active:scale-[0.985] disabled:opacity-60"
+                  >
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-base font-black text-black">G</span>
                     Continue with Google
                   </button>
                 </>
               )}
             </form>
+
           </section>
 
           <footer className="text-center text-sm text-zinc-500">
             {isSignUp ? 'Back to ' : isReset ? 'Remembered it? ' : 'Create account? '}
-            <button type="button" onClick={() => { setAuthMode(isSignUp || isReset ? 'signin' : 'signup'); setAuthMessage(null); }} className="font-bold text-lime-200">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode(isSignUp || isReset ? 'signin' : 'signup');
+                setAuthMessage(null);
+              }}
+              className="font-bold text-lime-200"
+            >
               {isSignUp || isReset ? 'Sign in' : 'Sign up'}
             </button>
           </footer>
@@ -1663,6 +1651,7 @@ export default function App() {
   return <BeatriceAgent user={user} onLogout={handleLogout} initialSettings={settings} />;
 }
 
+// ---------- Main agent component ----------
 function BeatriceAgent({
   user,
   onLogout,
@@ -1676,39 +1665,43 @@ function BeatriceAgent({
   const [connecting, setConnecting] = useState(false);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
-  const [micBands, setMicBands] = useState<number[]>(Array(20).fill(0));
-  const [speakerLevel, setSpeakerLevel] = useState(0);
+  const[micBands, setMicBands] = useState<number[]>(Array(20).fill(0));
+  const[speakerLevel, setSpeakerLevel] = useState(0);
   const [speakerBands, setSpeakerBands] = useState<number[]>(Array(20).fill(0));
   const [tasks, setTasks] = useState<ActionTask[]>([]);
   const [historyContext, setHistoryContext] = useState<string>('');
-  const [historyMsgs, setHistoryMsgs] = useState<ChatMessage[]>([]);
+  const[historyMsgs, setHistoryMsgs] = useState<ChatMessage[]>([]);
+  
   const [currentTranscript, setCurrentTranscript] = useState<{ role: 'user' | 'model'; text: string } | null>(null);
+  const [liveUserText, setLiveUserText] = useState('');
+  const[liveModelText, setLiveModelText] = useState('');
 
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(false);
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const[facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [showSidebar, setShowSidebar] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [chatInput, setChatInput] = useState('');
-  const [settings, setSettings] = useState<AgentSettings>({ ...DEFAULT_SETTINGS, ...initialSettings });
+  const[chatInput, setChatInput] = useState('');
+  const [settings, setSettings] = useState<AgentSettings>({
+    ...DEFAULT_SETTINGS,
+    ...initialSettings,
+  });
 
   const aiRef = useRef<GoogleGenAI | null>(null);
   const sessionRef = useRef<any>(null);
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
-  const startPromiseRef = useRef<Promise<boolean> | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   const transcriptTimeoutRef = useRef<any>(null);
   const isMutedRef = useRef(false);
   const isActiveRef = useRef(false);
-  const isClosingRef = useRef(false);
   const micAnimationFrameRef = useRef<number | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoIntervalRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   const modelTranscriptBufferRef = useRef('');
   const userTranscriptBufferRef = useRef('');
@@ -1716,16 +1709,24 @@ function BeatriceAgent({
   const lastSavedUserTranscriptRef = useRef('');
 
   const sessionGenerationRef = useRef(0);
+  const startPromiseRef = useRef<Promise<boolean> | null>(null);
   const videoEnabledRef = useRef(false);
   const videoStartingRef = useRef(false);
+  const ownerIdRef = useRef(`vep-owner-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   useEffect(() => {
     isMutedRef.current = isMuted;
-  }, [isMuted]);
+  },[isMuted]);
 
   useEffect(() => {
     isActiveRef.current = isActive;
   }, [isActive]);
+
+  useEffect(() => {
+    if (showSidebar) {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  },[historyMsgs, liveUserText, liveModelText, showSidebar]);
 
   useEffect(() => {
     let wakeLock: any = null;
@@ -1746,11 +1747,15 @@ function BeatriceAgent({
   }, [isActive]);
 
   useEffect(() => {
-    const historyRef = query(ref(rtdb, 'users/' + user.uid + '/messages'), orderByChild('timestamp'), limitToLast(160));
+    const historyRef = query(
+      ref(rtdb, 'users/' + user.uid + '/messages'),
+      orderByChild('timestamp'),
+      limitToLast(160)
+    );
 
     const unsub = onValue(historyRef, (snap) => {
       const msgs: string[] = [];
-      const rawMsgs: ChatMessage[] = [];
+      const rawMsgs: ChatMessage[] =[];
 
       snap.forEach(child => {
         const m = child.val() as ChatMessage;
@@ -1759,52 +1764,30 @@ function BeatriceAgent({
       });
 
       setHistoryMsgs(rawMsgs);
-      setHistoryContext(msgs.length > 0 ? 'Previous conversation for context memory:
-' + msgs.slice(-36).join('
-') : '');
+
+      if (msgs.length > 0) {
+        setHistoryContext('Previous conversation for context memory:\n' + msgs.slice(-36).join('\n'));
+      } else {
+        setHistoryContext('');
+      }
     });
 
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (apiKey) aiRef.current = new GoogleGenAI({ apiKey });
 
-    audioStreamerRef.current = audioStreamerRef.current || new AudioStreamer();
+    audioStreamerRef.current = LIVE_RUNTIME.audioStreamer || new AudioStreamer();
+    LIVE_RUNTIME.audioStreamer = audioStreamerRef.current;
 
     return () => {
       unsub();
       stopSession();
     };
-  }, [user.uid]);
+  },[user.uid]);
 
   const selectedVoiceMeta = useMemo(
     () => GEMINI_LIVE_VOICE_OPTIONS.find(v => v.id === settings.selectedVoice) || GEMINI_LIVE_VOICE_OPTIONS[0],
     [settings.selectedVoice]
   );
-
-  const chatMessagesWithStreaming = useMemo(() => {
-    if (!currentTranscript?.text.trim()) return historyMsgs;
-
-    const liveText = currentTranscript.text.trim();
-    const lastMessage = historyMsgs[historyMsgs.length - 1];
-
-    if (lastMessage && lastMessage.role === currentTranscript.role && lastMessage.text.trim() === liveText) {
-      return historyMsgs;
-    }
-
-    return [
-      ...historyMsgs,
-      {
-        role: currentTranscript.role,
-        text: liveText,
-        timestamp: Date.now(),
-        streaming: true,
-      },
-    ];
-  }, [currentTranscript, historyMsgs]);
-
-  useEffect(() => {
-    if (!showSidebar || !chatScrollRef.current) return;
-    chatScrollRef.current.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [chatMessagesWithStreaming, showSidebar]);
 
   const saveMessage = (role: 'user' | 'model', text: string, extra?: Partial<ChatMessage>) => {
     const clean = text.trim();
@@ -1831,6 +1814,7 @@ function BeatriceAgent({
     lastSavedModelTranscriptRef.current = clean;
     saveMessage('model', clean);
     modelTranscriptBufferRef.current = '';
+    setLiveModelText('');
   };
 
   const saveUserBuffer = () => {
@@ -1841,6 +1825,7 @@ function BeatriceAgent({
     lastSavedUserTranscriptRef.current = clean;
     saveMessage('user', clean);
     userTranscriptBufferRef.current = '';
+    setLiveUserText('');
   };
 
   const updateLiveTranscript = (role: 'user' | 'model', text: string, clearDelay = 3900) => {
@@ -1850,87 +1835,122 @@ function BeatriceAgent({
     setCurrentTranscript({ role, text: clean });
 
     if (transcriptTimeoutRef.current) clearTimeout(transcriptTimeoutRef.current);
-    transcriptTimeoutRef.current = setTimeout(() => setCurrentTranscript(null), clearDelay);
+    transcriptTimeoutRef.current = setTimeout(() => {
+      setCurrentTranscript(null);
+    }, clearDelay);
   };
 
-  const startMicVisualizer = () => {
-    const tick = () => {
-      const recorder: any = audioRecorderRef.current;
-      const streamer: any = audioStreamerRef.current;
-      let nextLevel = 0;
-      let nextBands = Array(20).fill(0);
-      let nextSpeakerLevel = 0;
-      let nextSpeakerBands = Array(20).fill(0);
+  const startMicVisualizer = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const ctx = new window.AudioContext();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64; 
+      source.connect(analyser);
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
-      try {
-        if (recorder && typeof recorder.getFrequencyBands === 'function') {
-          const bands = recorder.getFrequencyBands(20) || [];
-          nextBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
-          const frequencyAverage = nextBands.reduce((sum: number, n: number) => sum + n, 0) / Math.max(nextBands.length, 1);
-          const recorderLevel = typeof recorder.getLevel === 'function' ? recorder.getLevel() : 0;
-          nextLevel = Math.min(1, Math.max(recorderLevel, frequencyAverage * 1.8));
+      LIVE_RUNTIME.visStream = stream;
+      LIVE_RUNTIME.visCtx = ctx;
+      LIVE_RUNTIME.visAnalyser = analyser;
+
+      const tick = () => {
+        if (!isActiveRef.current) return;
+
+        let nextLevel = 0;
+        let nextBands = Array(20).fill(0);
+
+        if (analyser && !isMutedRef.current) {
+          analyser.getByteFrequencyData(dataArray);
+          const data = Array.from(dataArray).slice(0, 20); 
+          nextBands = data.map(v => v / 255);
+          nextLevel = Math.min(1, (nextBands.reduce((a, b) => a + b, 0) / 20) * 1.5);
         } else if (isActiveRef.current && !isMutedRef.current) {
-          nextLevel = 0.06;
-          nextBands = Array(20).fill(0.04);
+          nextLevel = 0.04;
+          nextBands = Array(20).fill(0.02);
         }
-      } catch (e) {
-        nextLevel = 0;
-        nextBands = Array(20).fill(0);
-      }
 
-      try {
-        if (streamer && typeof streamer.getFrequencyBands === 'function') {
-          const bands = streamer.getFrequencyBands(20) || [];
-          nextSpeakerBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
-          const frequencyAverage = nextSpeakerBands.reduce((sum: number, n: number) => sum + n, 0) / Math.max(nextSpeakerBands.length, 1);
-          const streamerLevel = typeof streamer.getLevel === 'function' ? streamer.getLevel() : 0;
-          nextSpeakerLevel = Math.min(1, Math.max(streamerLevel, frequencyAverage * 1.65));
+        let nextSpeakerLevel = 0;
+        let nextSpeakerBands = Array(20).fill(0);
+        try {
+          const streamer: any = audioStreamerRef.current;
+          if (streamer && typeof streamer.getFrequencyBands === 'function') {
+            const bands = streamer.getFrequencyBands(20) ||[];
+            nextSpeakerBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
+            const frequencyAverage = nextSpeakerBands.reduce((sum: number, n: number) => sum + n, 0) / 20;
+            const streamerLevel = typeof streamer.getLevel === 'function' ? streamer.getLevel() : 0;
+            nextSpeakerLevel = Math.min(1, Math.max(streamerLevel, frequencyAverage * 1.65));
+          }
+        } catch (e) {}
+
+        if (isMutedRef.current || !isActiveRef.current) {
+          nextLevel = 0;
+          nextBands = Array(20).fill(0);
         }
-      } catch (e) {
-        nextSpeakerLevel = 0;
-        nextSpeakerBands = Array(20).fill(0);
-      }
 
-      if (isMutedRef.current || !isActiveRef.current) {
-        nextLevel = 0;
-        nextBands = Array(20).fill(0);
-      }
+        if (!isActiveRef.current) {
+          nextSpeakerLevel = 0;
+          nextSpeakerBands = Array(20).fill(0);
+        }
 
-      if (!isActiveRef.current) {
-        nextSpeakerLevel = 0;
-        nextSpeakerBands = Array(20).fill(0);
-      }
+        setMicLevel(prev => prev + (nextLevel - prev) * 0.46);
+        setMicBands(prev => nextBands.map((band, i) => prev[i] + (band - prev[i]) * 0.42));
+        setSpeakerLevel(prev => prev + (nextSpeakerLevel - prev) * 0.5);
+        setSpeakerBands(prev => nextSpeakerBands.map((band, i) => prev[i] + (band - prev[i]) * 0.48));
 
-      setMicLevel(prev => prev + (nextLevel - prev) * 0.46);
-      setMicBands(prev => nextBands.map((band: number, i: number) => {
-        const current = prev[i] || 0;
-        return current + (band - current) * 0.42;
-      }));
-      setSpeakerLevel(prev => prev + (nextSpeakerLevel - prev) * 0.5);
-      setSpeakerBands(prev => nextSpeakerBands.map((band: number, i: number) => {
-        const current = prev[i] || 0;
-        return current + (band - current) * 0.48;
-      }));
+        micAnimationFrameRef.current = requestAnimationFrame(tick);
+      };
 
-      micAnimationFrameRef.current = requestAnimationFrame(tick);
-    };
+      tick();
+    } catch (err) {
+      console.error('Visualizer Mic access failed', err);
+      const tickFallback = () => {
+        let nextSpeakerLevel = 0;
+        let nextSpeakerBands = Array(20).fill(0);
+        try {
+          const streamer: any = audioStreamerRef.current;
+          if (streamer && typeof streamer.getFrequencyBands === 'function') {
+            const bands = streamer.getFrequencyBands(20) ||[];
+            nextSpeakerBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
+            const frequencyAverage = nextSpeakerBands.reduce((sum: number, n: number) => sum + n, 0) / 20;
+            const streamerLevel = typeof streamer.getLevel === 'function' ? streamer.getLevel() : 0;
+            nextSpeakerLevel = Math.min(1, Math.max(streamerLevel, frequencyAverage * 1.65));
+          }
+        } catch (e) {}
 
-    if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current);
-    micAnimationFrameRef.current = requestAnimationFrame(tick);
+        setMicLevel(0);
+        setMicBands(Array(20).fill(0));
+        setSpeakerLevel(prev => prev + (nextSpeakerLevel - prev) * 0.5);
+        setSpeakerBands(prev => nextSpeakerBands.map((band, i) => prev[i] + (band - prev[i]) * 0.48));
+        micAnimationFrameRef.current = requestAnimationFrame(tickFallback);
+      };
+      tickFallback();
+    }
   };
 
   const stopMicVisualizer = () => {
     if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current);
     micAnimationFrameRef.current = null;
+    
     setMicLevel(0);
     setMicBands(Array(20).fill(0));
     setSpeakerLevel(0);
     setSpeakerBands(Array(20).fill(0));
+
+    if (LIVE_RUNTIME.visStream) {
+      LIVE_RUNTIME.visStream.getTracks().forEach(t => t.stop());
+      LIVE_RUNTIME.visStream = null;
+    }
+    if (LIVE_RUNTIME.visCtx) {
+      LIVE_RUNTIME.visCtx.close().catch(()=>{});
+      LIVE_RUNTIME.visCtx = null;
+      LIVE_RUNTIME.visAnalyser = null;
+    }
   };
 
   const sendTextToLive = (text: string) => {
-    const session = sessionRef.current;
-    if (isClosingRef.current) return;
+    const session = sessionRef.current || LIVE_RUNTIME.session;
+    if (LIVE_RUNTIME.isClosing) return;
     if (!session || typeof session.sendRealtimeInput !== 'function') return;
 
     try {
@@ -1941,8 +1961,9 @@ function BeatriceAgent({
   };
 
   const sendAudioToLive = (base64: string) => {
-    const session = sessionRef.current;
-    if (isClosingRef.current) return;
+    const session = sessionRef.current || LIVE_RUNTIME.session;
+
+    if (LIVE_RUNTIME.isClosing) return;
     if (!isActiveRef.current) return;
     if (isMutedRef.current) return;
     if (!session || typeof session.sendRealtimeInput !== 'function') return;
@@ -1959,9 +1980,10 @@ function BeatriceAgent({
     }
   };
 
-  const sendVideoToLive = (base64Data: string, mimeType = 'image/jpeg') => {
-    const session = sessionRef.current;
-    if (isClosingRef.current) return;
+  const sendVideoToLive = (base64Data: string) => {
+    const session = sessionRef.current || LIVE_RUNTIME.session;
+
+    if (LIVE_RUNTIME.isClosing) return;
     if (!isActiveRef.current) return;
     if (!session || typeof session.sendRealtimeInput !== 'function') return;
 
@@ -1969,46 +1991,12 @@ function BeatriceAgent({
       session.sendRealtimeInput({
         video: {
           data: base64Data,
-          mimeType,
+          mimeType: 'image/jpeg',
         },
       });
     } catch (error) {
       if (!isClosedSocketError(error)) console.error('Live video send failed:', error);
     }
-  };
-
-  const sendInlineFileToLive = (base64Data: string, mimeType: string, instructionText: string) => {
-    const session: any = sessionRef.current;
-    if (isClosingRef.current) return false;
-    if (!session) return false;
-
-    try {
-      if (typeof session.sendClientContent === 'function') {
-        session.sendClientContent({
-          turns: [
-            {
-              role: 'user',
-              parts: [
-                { text: instructionText },
-                {
-                  inlineData: {
-                    mimeType,
-                    data: base64Data,
-                  },
-                },
-              ],
-            },
-          ],
-          turnComplete: true,
-        });
-        return true;
-      }
-    } catch (error) {
-      if (!isClosedSocketError(error)) console.error('Inline file send failed:', error);
-    }
-
-    sendTextToLive(instructionText);
-    return false;
   };
 
   const sendChatMessage = (e?: FormEvent) => {
@@ -2048,7 +2036,10 @@ function BeatriceAgent({
 
     if (res.status === 401 || res.status === 403) {
       localStorage.removeItem('googleAccessToken');
-      throw new Error('Google permission expired or was revoked. Sign in with Google again from Profile to reconnect Gmail, Drive, and Calendar.');
+
+      throw new Error(
+        'Google permission expired or was revoked. Sign in with Google again from Profile to reconnect Gmail, Drive, and Calendar.'
+      );
     }
 
     if (!res.ok) {
@@ -2074,7 +2065,7 @@ function BeatriceAgent({
   const getCurrentUserEmail = () => user.email || '';
 
   const searchDriveFirst = async (q: string) => {
-    const escaped = q.replace(/'/g, "\'");
+    const escaped = q.replace(/'/g, "\\'");
     const result = await googleJson(
       `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name contains '${escaped}' and trashed = false`)}&fields=files(id,name,mimeType,webViewLink,webContentLink,modifiedTime)&pageSize=1`
     );
@@ -2092,7 +2083,7 @@ function BeatriceAgent({
       await googleJson(`https://docs.googleapis.com/v1/documents/${doc.documentId}:batchUpdate`, {
         method: 'POST',
         body: JSON.stringify({
-          requests: [
+          requests:[
             {
               insertText: {
                 location: { index: 1 },
@@ -2123,23 +2114,15 @@ function BeatriceAgent({
     const metadata: any = { name: fileName };
     if (folderId) metadata.parents = [folderId];
 
-    const boundary = `boundary_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const boundary = `boundary_${Date.now()}`;
 
     const multipartBody =
-      `--${boundary}
-` +
-      'Content-Type: application/json; charset=UTF-8
-
-' +
+      `--${boundary}\r\n` +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
       JSON.stringify(metadata) +
-      `
---${boundary}
-` +
-      `Content-Type: ${mimeType}
-
-` +
-      `${content || ''}
-` +
+      `\r\n--${boundary}\r\n` +
+      `Content-Type: ${mimeType}\r\n\r\n` +
+      `${content || ''}\r\n` +
       `--${boundary}--`;
 
     return googleFetch(
@@ -2206,20 +2189,22 @@ function BeatriceAgent({
         const emailTo = args.emailTo === 'current_user' ? getCurrentUserEmail() : args.emailTo;
 
         if (args.saveToDrive) {
-          driveFile = await uploadTextFileToDrive(htmlFile.htmlPreviewFilename, htmlFile.html, 'text/html');
+          driveFile = await uploadTextFileToDrive(
+            htmlFile.htmlPreviewFilename,
+            htmlFile.html,
+            'text/html'
+          );
         }
 
         if (emailTo) {
           emailResult = await sendGmail({
             to: emailTo,
             subject: title,
-            body: `${summary}
-
-Attached is the standalone HTML artifact. Open it in a browser to view it.`,
+            body: `${summary}\n\nAttached is the standalone HTML artifact. Open it in a browser to view it.`,
             attachment: {
               filename: htmlFile.htmlPreviewFilename,
               mimeType: 'text/html',
-              base64Content: stringToBase64(htmlFile.html),
+              base64Content: utf8ToBase64(htmlFile.html),
             },
           });
         }
@@ -2247,12 +2232,12 @@ Attached is the standalone HTML artifact. Open it in a browser to view it.`,
         );
 
         const messages = await Promise.all(
-          (list.messages || []).map(async (m: any) => {
+          (list.messages ||[]).map(async (m: any) => {
             const msg = await googleJson(
               `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`
             );
 
-            const headers = msg.payload?.headers || [];
+            const headers = msg.payload?.headers ||[];
             const findHeader = (name: string) => headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
 
             return {
@@ -2270,10 +2255,13 @@ Attached is the standalone HTML artifact. Open it in a browser to view it.`,
       }
 
       case 'gmail_send': {
+        const to = args.to === 'current_user' ? getCurrentUserEmail() : args.to;
+        if (!to) throw new Error('Recipient email address is required.');
+
         const result = await sendGmail({
-          to: args.to,
-          subject: args.subject,
-          body: args.body,
+          to,
+          subject: args.subject || 'No Subject',
+          body: args.body || '',
           cc: args.cc,
           bcc: args.bcc,
         });
@@ -2282,10 +2270,13 @@ Attached is the standalone HTML artifact. Open it in a browser to view it.`,
       }
 
       case 'gmail_draft': {
+        const to = args.to === 'current_user' ? getCurrentUserEmail() : args.to;
+        if (!to) throw new Error('Recipient email address is required.');
+
         const raw = buildEmailRaw({
-          to: args.to,
-          subject: args.subject,
-          body: args.body,
+          to,
+          subject: args.subject || 'No Subject',
+          body: args.body || '',
           cc: args.cc,
           bcc: args.bcc,
         });
@@ -2304,7 +2295,7 @@ Attached is the standalone HTML artifact. Open it in a browser to view it.`,
           `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=20&timeMin=${encodeURIComponent(range.timeMin)}&timeMax=${encodeURIComponent(range.timeMax)}`
         );
 
-        return { toolName, executedAt, status: 'completed', range, events: events.items || [] };
+        return { toolName, executedAt, status: 'completed', range, events: events.items ||[] };
       }
 
       case 'calendar_create_event': {
@@ -2379,7 +2370,7 @@ Attached is the standalone HTML artifact. Open it in a browser to view it.`,
       case 'drive_search': {
         const q = args.query || '';
         const limit = Math.min(Number(args.limit || 10), 50);
-        const escaped = q.replace(/'/g, "\'");
+        const escaped = q.replace(/'/g, "\\'");
         let mimeClause = '';
 
         if (args.fileType) {
@@ -2395,7 +2386,7 @@ Attached is the standalone HTML artifact. Open it in a browser to view it.`,
           `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name contains '${escaped}' and trashed = false${mimeClause}`)}&fields=files(id,name,mimeType,webViewLink,webContentLink,modifiedTime,size)&pageSize=${limit}`
         );
 
-        return { toolName, executedAt, status: 'completed', files: result.files || [] };
+        return { toolName, executedAt, status: 'completed', files: result.files ||[] };
       }
 
       case 'drive_read_file': {
@@ -2454,12 +2445,19 @@ Attached is the standalone HTML artifact. Open it in a browser to view it.`,
       }
 
       case 'drive_upload_file': {
-        const result = await uploadTextFileToDrive(args.fileName, args.content || '', args.mimeType || 'text/plain', args.folderId);
+        const result = await uploadTextFileToDrive(
+          args.fileName,
+          args.content || '',
+          args.mimeType || 'text/plain',
+          args.folderId
+        );
+
         return { toolName, executedAt, status: 'completed', file: result };
       }
 
       case 'docs_create': {
         const doc = await createGoogleDoc(args.title, args.content || '');
+
         let pdfDownload: any = {};
         let emailResult: any = null;
 
@@ -2516,7 +2514,7 @@ Attached is the standalone HTML artifact. Open it in a browser to view it.`,
           await googleJson(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
             method: 'POST',
             body: JSON.stringify({
-              requests: [
+              requests:[
                 {
                   deleteContentRange: {
                     range: { startIndex: 1, endIndex: Math.max(1, endIndex - 1) },
@@ -2535,12 +2533,11 @@ Attached is the standalone HTML artifact. Open it in a browser to view it.`,
           await googleJson(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
             method: 'POST',
             body: JSON.stringify({
-              requests: [
+              requests:[
                 {
                   insertText: {
                     endOfSegmentLocation: {},
-                    text: `
-${args.content}`,
+                    text: `\n${args.content}`,
                   },
                 },
               ],
@@ -2570,7 +2567,7 @@ ${args.content}`,
           `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`
         );
 
-        return { toolName, executedAt, status: 'completed', spreadsheetId, range, values: result.values || [] };
+        return { toolName, executedAt, status: 'completed', spreadsheetId, range, values: result.values ||[] };
       }
 
       case 'sheets_update': {
@@ -2579,7 +2576,7 @@ ${args.content}`,
           {
             method: 'PUT',
             body: JSON.stringify({
-              values: Array.isArray(args.values) ? args.values : args.values?.values || [],
+              values: Array.isArray(args.values) ? args.values : args.values?.values ||[],
             }),
           }
         );
@@ -2599,7 +2596,7 @@ ${args.content}`,
       case 'tasks_list': {
         const listId = args.listId || '@default';
         const result = await googleJson(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks`);
-        return { toolName, executedAt, status: 'completed', tasks: result.items || [] };
+        return { toolName, executedAt, status: 'completed', tasks: result.items ||[] };
       }
 
       case 'tasks_create': {
@@ -2620,7 +2617,7 @@ ${args.content}`,
           `https://people.googleapis.com/v1/people:searchContacts?query=${encodeURIComponent(args.query)}&readMask=names,emailAddresses,phoneNumbers,organizations`
         );
 
-        return { toolName, executedAt, status: 'completed', contacts: result.results || [] };
+        return { toolName, executedAt, status: 'completed', contacts: result.results ||[] };
       }
 
       case 'meet_schedule': {
@@ -2660,7 +2657,7 @@ ${args.content}`,
           `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=${limit}&q=${encodeURIComponent(args.query)}`
         );
 
-        return { toolName, executedAt, status: 'completed', videos: result.items || [] };
+        return { toolName, executedAt, status: 'completed', videos: result.items ||[] };
       }
 
       case 'forms_create': {
@@ -2806,11 +2803,19 @@ ${args.content}`,
   const startSession = async (options: { sendGreeting?: boolean } = {}): Promise<boolean> => {
     const { sendGreeting = true } = options;
 
-    if (startPromiseRef.current) {
-      return startPromiseRef.current;
+    if (LIVE_RUNTIME.startPromise) {
+      startPromiseRef.current = LIVE_RUNTIME.startPromise;
+      return LIVE_RUNTIME.startPromise;
     }
 
-    if (sessionRef.current && isActiveRef.current && !isClosingRef.current) {
+    if (LIVE_RUNTIME.session && !LIVE_RUNTIME.isClosing) {
+      sessionRef.current = LIVE_RUNTIME.session;
+      audioRecorderRef.current = LIVE_RUNTIME.audioRecorder;
+      audioStreamerRef.current = LIVE_RUNTIME.audioStreamer;
+      isActiveRef.current = true;
+      setIsActive(true);
+      setConnecting(false);
+      startMicVisualizer();
       return true;
     }
 
@@ -2820,31 +2825,43 @@ ${args.content}`,
         return false;
       }
 
-      const sessionGeneration = sessionGenerationRef.current + 1;
+      const sessionGeneration = LIVE_RUNTIME.generation + 1;
+      LIVE_RUNTIME.generation = sessionGeneration;
+      LIVE_RUNTIME.ownerId = ownerIdRef.current;
+      LIVE_RUNTIME.isClosing = false;
       sessionGenerationRef.current = sessionGeneration;
-      isClosingRef.current = false;
 
       setConnecting(true);
       modelTranscriptBufferRef.current = '';
       userTranscriptBufferRef.current = '';
       lastSavedModelTranscriptRef.current = '';
       lastSavedUserTranscriptRef.current = '';
+      
+      setLiveUserText('');
+      setLiveModelText('');
 
       try {
+        try { LIVE_RUNTIME.audioRecorder?.stop(); } catch (e) {}
         try { audioRecorderRef.current?.stop(); } catch (e) {}
+        try { LIVE_RUNTIME.audioStreamer?.stop(); } catch (e) {}
         try { audioStreamerRef.current?.stop(); } catch (e) {}
+        try { LIVE_RUNTIME.session?.close(); } catch (e) {}
         try { sessionRef.current?.close(); } catch (e) {}
 
+        LIVE_RUNTIME.audioRecorder = null;
+        LIVE_RUNTIME.session = null;
         audioRecorderRef.current = null;
         sessionRef.current = null;
 
-        const streamer = audioStreamerRef.current || new AudioStreamer();
+        const streamer = new AudioStreamer();
+        LIVE_RUNTIME.audioStreamer = streamer;
         audioStreamerRef.current = streamer;
+
         await streamer.init(24000);
 
         const hasGoogleServiceAccess = Boolean(localStorage.getItem('googleAccessToken'));
 
-        const systemInstruction = [
+        const systemInstruction =[
           BASE_LIVE_AGENT_PROMPT,
           BIBLE_PERSONALITY || '',
           historyContext,
@@ -2859,10 +2876,7 @@ ${args.content}`,
           `Selected visible voice alias: ${selectedVoiceMeta.alias}. Internal voice id: ${selectedVoiceMeta.id}. Voice vibe: ${selectedVoiceMeta.vibe}. Do not mention the internal voice id unless asked by the developer.`,
           `When asked to create, build, render, showcase, prototype, code, animate, make slides, make forms, make dashboards, make pages, make Three.js demos, or make printable documents, call render_web_artifact with a complete standalone HTML/CSS/JS file. Never just describe the code if the user wants it rendered or built.`,
           `For HTML/CSS/JS artifacts, include all CSS in <style> and all JS in <script>. Make it directly openable. For slides, include navigation controls and keyboard support. For documents, include print CSS and a print button. For Three.js, load Three.js from a CDN and keep everything in one HTML file.`,
-          `When the user uploads a file, image, audio file, or video file, inspect the attached content when it is provided through inline data, audio chunks, video frames, or text excerpts. Do not say you cannot see it if visible file content has been sent.`,
-        ].filter(Boolean).join('
-
-');
+        ].filter(Boolean).join('\n\n');
 
         const session = await aiRef.current.live.connect({
           model: LIVE_MODEL,
@@ -2878,34 +2892,34 @@ ${args.content}`,
             systemInstruction,
             inputAudioTranscription: {},
             outputAudioTranscription: {},
-            tools: [{
+            tools:[{
               functionDeclarations: GOOGLE_SERVICE_TOOLS,
             }],
           },
           callbacks: {
             onopen: () => {
-              if (sessionGenerationRef.current !== sessionGeneration) return;
+              if (LIVE_RUNTIME.generation !== sessionGeneration) return;
               console.log('Live session opened.');
             },
 
             onmessage: async (msg: LiveServerMessage) => {
-              if (sessionGenerationRef.current !== sessionGeneration) return;
+              if (LIVE_RUNTIME.generation !== sessionGeneration) return;
 
               if (msg.toolCall) {
                 const calls = msg.toolCall.functionCalls;
 
                 if (calls) {
-                  const resps = [];
+                  const resps =[];
 
                   for (const c of calls) {
-                    if (sessionGenerationRef.current !== sessionGeneration) return;
+                    if (LIVE_RUNTIME.generation !== sessionGeneration) return;
 
                     const toolName = c.name || 'unknown_tool';
                     const args = c.args as any;
                     const tid = Math.random().toString(36).substring(7);
                     const action = safeJsonStringify(args || {});
 
-                    setTasks(p => [...p, {
+                    setTasks(p =>[...p, {
                       id: tid,
                       serviceName: toolName,
                       action,
@@ -2989,7 +3003,7 @@ ${args.content}`,
 
                   if (
                     resps.length > 0 &&
-                    sessionGenerationRef.current === sessionGeneration &&
+                    LIVE_RUNTIME.generation === sessionGeneration &&
                     sessionRef.current &&
                     typeof sessionRef.current.sendToolResponse === 'function'
                   ) {
@@ -3004,19 +3018,22 @@ ${args.content}`,
                 if (serverContent.interrupted) {
                   audioStreamerRef.current?.stop();
                   setIsAgentSpeaking(false);
-                  modelTranscriptBufferRef.current = '';
+                  
+                  saveModelBuffer();
                   return;
                 }
 
                 if (serverContent.inputTranscription?.text) {
                   const inputText = serverContent.inputTranscription.text;
                   userTranscriptBufferRef.current = inputText.trim();
+                  setLiveUserText(userTranscriptBufferRef.current);
                   updateLiveTranscript('user', userTranscriptBufferRef.current, 3200);
                 }
 
                 if (serverContent.outputTranscription?.text) {
                   const outputText = serverContent.outputTranscription.text;
                   modelTranscriptBufferRef.current = (modelTranscriptBufferRef.current + outputText).trim();
+                  setLiveModelText(modelTranscriptBufferRef.current);
                   updateLiveTranscript('model', modelTranscriptBufferRef.current, 3900);
                 }
 
@@ -3024,14 +3041,14 @@ ${args.content}`,
 
                 if (parts) {
                   for (const part of parts) {
-                    if (sessionGenerationRef.current !== sessionGeneration) return;
+                    if (LIVE_RUNTIME.generation !== sessionGeneration) return;
 
                     if (part.inlineData?.data) {
                       audioStreamerRef.current?.addPCM16(part.inlineData.data);
                       setIsAgentSpeaking(true);
 
                       setTimeout(() => {
-                        if (sessionGenerationRef.current === sessionGeneration) {
+                        if (LIVE_RUNTIME.generation === sessionGeneration) {
                           setIsAgentSpeaking(false);
                         }
                       }, 620);
@@ -3039,6 +3056,7 @@ ${args.content}`,
 
                     if (part.text?.trim()) {
                       modelTranscriptBufferRef.current = (modelTranscriptBufferRef.current + ' ' + part.text).trim();
+                      setLiveModelText(modelTranscriptBufferRef.current);
                       updateLiveTranscript('model', modelTranscriptBufferRef.current, 3900);
                     }
                   }
@@ -3052,11 +3070,13 @@ ${args.content}`,
             },
 
             onclose: () => {
-              if (sessionGenerationRef.current !== sessionGeneration) return;
+              if (LIVE_RUNTIME.generation !== sessionGeneration) return;
 
+              LIVE_RUNTIME.session = null;
+              LIVE_RUNTIME.audioRecorder = null;
+              LIVE_RUNTIME.isClosing = false;
               sessionRef.current = null;
               audioRecorderRef.current = null;
-              isClosingRef.current = false;
 
               stopMicVisualizer();
               stopVideoStream(false);
@@ -3065,11 +3085,14 @@ ${args.content}`,
               setIsActive(false);
               setConnecting(false);
               setIsAgentSpeaking(false);
+              
+              setLiveUserText('');
+              setLiveModelText('');
               setCurrentTranscript(null);
             },
 
             onerror: (err: any) => {
-              if (sessionGenerationRef.current !== sessionGeneration) return;
+              if (LIVE_RUNTIME.generation !== sessionGeneration) return;
 
               console.error('Live API Error:', err);
               stopSession();
@@ -3077,24 +3100,29 @@ ${args.content}`,
           },
         });
 
-        if (sessionGenerationRef.current !== sessionGeneration) {
+        if (LIVE_RUNTIME.generation !== sessionGeneration) {
           try { session?.close(); } catch (e) {}
           return false;
         }
 
+        LIVE_RUNTIME.session = session;
+        LIVE_RUNTIME.ownerId = ownerIdRef.current;
+        LIVE_RUNTIME.isClosing = false;
         sessionRef.current = session;
-        isClosingRef.current = false;
 
         const recorder = new AudioRecorder((base64) => {
-          if (sessionGenerationRef.current !== sessionGeneration) return;
+          if (LIVE_RUNTIME.generation !== sessionGeneration) return;
           if (isMutedRef.current) return;
+
           sendAudioToLive(base64);
         });
 
+        LIVE_RUNTIME.audioRecorder = recorder;
         audioRecorderRef.current = recorder;
+
         await recorder.start();
 
-        if (sessionGenerationRef.current !== sessionGeneration) {
+        if (LIVE_RUNTIME.generation !== sessionGeneration) {
           try { recorder.stop(); } catch (e) {}
           try { session?.close(); } catch (e) {}
           return false;
@@ -3107,7 +3135,7 @@ ${args.content}`,
 
         if (sendGreeting) {
           setTimeout(() => {
-            if (sessionGenerationRef.current !== sessionGeneration) return;
+            if (LIVE_RUNTIME.generation !== sessionGeneration) return;
 
             sendTextToLive(
               `${settings.userName} is here in the office. Start like ${settings.agentName} is already sitting at the desk nearby as the office employee. If previous conversation context is available, you may briefly mention one relevant thing remembered from it. Begin in English, normally and respectfully, like: "Yes, boss. I'm listening." or "Yes, I'm here, Meneer Jo. I'm listening." Do not ask how you can help.`
@@ -3119,7 +3147,7 @@ ${args.content}`,
       } catch (err) {
         console.error('Session start failed:', err);
 
-        if (sessionGenerationRef.current === sessionGeneration) {
+        if (LIVE_RUNTIME.generation === sessionGeneration) {
           stopSession();
         }
 
@@ -3127,49 +3155,15 @@ ${args.content}`,
       }
     })();
 
+    LIVE_RUNTIME.startPromise = startPromise;
     startPromiseRef.current = startPromise;
 
     try {
       return await startPromise;
     } finally {
-      if (startPromiseRef.current === startPromise) {
-        startPromiseRef.current = null;
-      }
+      if (LIVE_RUNTIME.startPromise === startPromise) LIVE_RUNTIME.startPromise = null;
+      if (startPromiseRef.current === startPromise) startPromiseRef.current = null;
     }
-  };
-
-  const stopSession = () => {
-    isClosingRef.current = true;
-    sessionGenerationRef.current += 1;
-    isActiveRef.current = false;
-
-    const recorder = audioRecorderRef.current;
-    const streamer = audioStreamerRef.current;
-    const session = sessionRef.current;
-
-    try { recorder?.stop(); } catch (e) {}
-    try { streamer?.stop(); } catch (e) {}
-    try { session?.close(); } catch (e) {}
-
-    audioRecorderRef.current = null;
-    sessionRef.current = null;
-    isClosingRef.current = false;
-
-    stopMicVisualizer();
-    stopVideoStream(false);
-
-    modelTranscriptBufferRef.current = '';
-    userTranscriptBufferRef.current = '';
-
-    if (transcriptTimeoutRef.current) {
-      clearTimeout(transcriptTimeoutRef.current);
-      transcriptTimeoutRef.current = null;
-    }
-
-    setIsActive(false);
-    setConnecting(false);
-    setIsAgentSpeaking(false);
-    setCurrentTranscript(null);
   };
 
   const toggleVideo = async () => {
@@ -3197,7 +3191,7 @@ ${args.content}`,
       const activeVideoSessionGeneration = sessionGenerationRef.current;
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
+        audio: false, // Prevents breaking AudioRecorder's echo cancellation
         video: {
           facingMode,
           width: 1280,
@@ -3276,16 +3270,9 @@ ${args.content}`,
         const base64Data = base64Url.split(',')[1];
 
         if (base64Data) {
-          const text = `${settings.userName} captured this photo. Look at it and respond normally, briefly, and clearly.`;
-          sendTextToLive(text);
+          sendTextToLive(`${settings.userName} captured this photo. Look at it and respond normally, briefly, and clearly.`);
           sendVideoToLive(base64Data);
-          saveMessage('user', '[Captured photo]', {
-            fileName: `camera-photo-${Date.now()}.jpg`,
-            fileType: 'image/jpeg',
-            fileKind: 'image',
-            filePreviewData: base64Url,
-            fileDownloadData: base64Url,
-          });
+          saveMessage('user', '[Sent Photo]');
         }
       }
     }
@@ -3327,113 +3314,132 @@ ${args.content}`,
 
   const handleAttachFile = async (file: File) => {
     const safeName = file.name || 'attached file';
-    const fileType = file.type || 'application/octet-stream';
-    const fileKind = getFileKind(file);
-    const canStorePreview = file.size <= MAX_STORED_FILE_PREVIEW_BYTES;
-    const filePreviewData = canStorePreview ? await fileToDataUrl(file).catch(() => '') : '';
-    const fileDownloadData = filePreviewData || '';
-    const base64Data = await fileToBase64(file).catch(() => '');
-    const readableKind = fileKind || 'file';
+    const fileType = file.type || 'unknown';
+    const ext = safeName.split('.').pop()?.toLowerCase() || '';
 
-    const messageText = `[Attached ${readableKind}: ${safeName}]`;
+    const isImage = fileType.startsWith('image/');
+    const isAudio = fileType.startsWith('audio/');
+    const isVideo = fileType.startsWith('video/');
+    const isTextLike = fileType.startsWith('text/') ||['css','js','jsx','ts','tsx','json','md','csv','html','xml'].includes(ext);
 
-    saveMessage('user', messageText, {
+    let previewUrl = await generateFileThumbnail(file, fileType);
+    let previewText = '';
+    let fullText = '';
+
+    if (!isImage && !isVideo && !isAudio && (isTextLike || file.size < 500000)) {
+      try {
+        fullText = await file.text();
+        if (!/\x00/.test(fullText)) {
+          previewText = fullText.slice(0, 800) + (fullText.length > 800 ? '\n...[truncated]' : '');
+        } else {
+           fullText = ''; 
+        }
+      } catch (e) {}
+    }
+
+    saveMessage('user', `[Attached file: ${safeName}]`, {
       fileName: safeName,
       fileType,
-      fileSize: file.size,
-      fileKind,
-      filePreviewData: filePreviewData || undefined,
-      fileDownloadData: fileDownloadData || undefined,
+      previewUrl: previewUrl || undefined,
+      previewText: previewText || undefined,
     });
 
-    updateLiveTranscript('user', `Attached ${readableKind}: ${safeName}`, 3000);
+    updateLiveTranscript('user', `Attached file: ${safeName}`, 3000);
 
-    const liveReady = sessionRef.current && isActiveRef.current
-      ? true
-      : await startSession({ sendGreeting: false });
-
-    if (!liveReady || !sessionRef.current) {
-      saveMessage('model', `${settings.agentName} could not inspect "${safeName}" because the live session is not connected.`);
+    if (!sessionRef.current) {
+      const msg = `${settings.agentName} is not connected yet. Start the live session first to process files.`;
+      updateLiveTranscript('model', msg, 3400);
+      saveMessage('model', msg);
       return;
     }
 
-    sendTextToLive(
-      `${settings.userName} attached a ${readableKind} named "${safeName}" with MIME type "${fileType}" and size ${formatFileSize(file.size)}. Inspect the attached content if it is provided next, then respond naturally with what you can identify.`
-    );
-
     try {
-      if (fileKind === 'text') {
-        const textPreview = await readTextFile(file, 40000);
-        sendTextToLive(
-          `${settings.userName} uploaded this text file: "${safeName}". Read it and respond normally.
-
-${textPreview}`
-        );
-        return;
-      }
-
-      if (base64Data) {
-        sendInlineFileToLive(
-          base64Data,
-          fileType,
-          `${settings.userName} uploaded "${safeName}". Inspect this inline file content and identify what it is.`
-        );
-      }
-
-      if (fileKind === 'image' && base64Data) {
-        sendVideoToLive(base64Data, fileType || 'image/jpeg');
-        sendTextToLive(`Look at the uploaded image "${safeName}" and describe what is visible.`);
-        return;
-      }
-
-      if (fileKind === 'audio') {
-        sendTextToLive(`The uploaded audio file "${safeName}" is being sent as audio chunks. Listen to it and respond with what you hear.`);
-        try {
-          const chunks = await decodeAudioFileToPcm16Chunks(file, 0.5);
-          for (const chunk of chunks.slice(0, 120)) {
-            if (!sessionRef.current || !isActiveRef.current) break;
-            sendAudioToLive(chunk);
-            await delay(35);
+      if (isImage || isVideo) {
+         if (previewUrl) {
+            const base64Data = previewUrl.split(',')[1];
+            sendVideoToLive(base64Data);
+            sendTextToLive(`${settings.userName} uploaded a ${isImage ? 'image' : 'video'} named ${safeName}. Please look at the frame and respond.`);
+         }
+      } else if (isAudio) {
+          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+          const ctx = new AudioCtx({ sampleRate: 16000 });
+          const arrayBuffer = await file.arrayBuffer();
+          const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+          const channelData = audioBuffer.getChannelData(0); 
+          
+          const pcm16 = new Int16Array(channelData.length);
+          for (let i = 0; i < channelData.length; i++) {
+            let s = Math.max(-1, Math.min(1, channelData[i]));
+            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
           }
-          sendTextToLive(`That was the uploaded audio file "${safeName}". Summarize or identify it now.`);
-        } catch (error) {
-          console.error('Audio file decode failed:', error);
-          sendTextToLive(`I could not decode the uploaded audio file "${safeName}" in the browser, but its inline file data was provided if supported.`);
-        }
-        return;
-      }
-
-      if (fileKind === 'video') {
-        sendTextToLive(`The uploaded video file "${safeName}" is being sampled into visual frames. Inspect the frames and identify the video content.`);
-        try {
-          const frames = await sampleVideoFrames(file, 6);
-          for (const frame of frames) {
-            if (!sessionRef.current || !isActiveRef.current) break;
-            sendVideoToLive(frame, 'image/jpeg');
-            await delay(160);
+          
+          const bytes = new Uint8Array(pcm16.buffer);
+          let binary = '';
+          const chunkSize = 0x8000;
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]);
           }
-          sendTextToLive(`Those were sampled frames from the uploaded video "${safeName}". Summarize what you saw.`);
-        } catch (error) {
-          console.error('Video frame sampling failed:', error);
-          sendTextToLive(`I could not sample frames from the uploaded video "${safeName}", but its inline file data was provided if supported.`);
-        }
-        return;
+          const base64Data = btoa(binary);
+          sendAudioToLive(base64Data);
+          sendTextToLive(`${settings.userName} uploaded an audio file named ${safeName}. Please listen to it and respond.`);
+      } else if (fullText) {
+           sendTextToLive(`${settings.userName} uploaded a document/code file named ${safeName}. Content:\n\n${fullText}\n\nPlease read it and respond.`);
+      } else {
+           sendTextToLive(`${settings.userName} uploaded a file named "${safeName}" with type "${fileType}". You cannot read its binary contents directly, so acknowledge it normally.`);
       }
-
-      if (fileKind === 'document') {
-        sendTextToLive(
-          `The uploaded document "${safeName}" has been attached as inline file data where supported. If you can inspect it, summarize it. If not, say clearly that this browser runtime needs document text extraction for that file type.`
-        );
-        return;
-      }
-
-      sendTextToLive(
-        `The uploaded file "${safeName}" has been attached as inline file data where supported. If you can inspect it, identify it.`
-      );
-    } catch (error: any) {
-      console.error('File handling failed:', error);
-      saveMessage('model', `I had trouble reading "${safeName}": ${String(error?.message || error)}`);
+    } catch (e) {
+      console.error("File processing error", e);
+      sendTextToLive(`${settings.userName} tried to upload ${safeName}, but there was an error processing it locally.`);
     }
+  };
+
+  const stopSession = () => {
+    if (LIVE_RUNTIME.ownerId && LIVE_RUNTIME.ownerId !== ownerIdRef.current && LIVE_RUNTIME.session) {
+      sessionRef.current = null;
+      audioRecorderRef.current = null;
+      return;
+    }
+
+    LIVE_RUNTIME.isClosing = true;
+    LIVE_RUNTIME.generation += 1;
+    sessionGenerationRef.current = LIVE_RUNTIME.generation;
+
+    isActiveRef.current = false;
+
+    const recorder = audioRecorderRef.current || LIVE_RUNTIME.audioRecorder;
+    const streamer = audioStreamerRef.current || LIVE_RUNTIME.audioStreamer;
+    const session = sessionRef.current || LIVE_RUNTIME.session;
+
+    try { recorder?.stop(); } catch (e) {}
+    try { streamer?.stop(); } catch (e) {}
+    try { session?.close(); } catch (e) {}
+
+    LIVE_RUNTIME.audioRecorder = null;
+    LIVE_RUNTIME.session = null;
+    LIVE_RUNTIME.ownerId = '';
+    LIVE_RUNTIME.isClosing = false;
+
+    audioRecorderRef.current = null;
+    sessionRef.current = null;
+
+    stopMicVisualizer();
+    stopVideoStream(false);
+
+    modelTranscriptBufferRef.current = '';
+    userTranscriptBufferRef.current = '';
+
+    if (transcriptTimeoutRef.current) {
+      clearTimeout(transcriptTimeoutRef.current);
+      transcriptTimeoutRef.current = null;
+    }
+
+    setIsActive(false);
+    setConnecting(false);
+    setIsAgentSpeaking(false);
+    
+    setLiveUserText('');
+    setLiveModelText('');
+    setCurrentTranscript(null);
   };
 
   const persistSettings = async () => {
@@ -3449,14 +3455,16 @@ ${textPreview}`
   };
 
   return (
-    <div className="relative flex h-[100dvh] min-h-screen flex-col overflow-hidden bg-[#020203] text-zinc-300 selection:bg-lime-300/30" style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}>
+    <div
+      className="relative flex h-[100dvh] min-h-screen flex-col overflow-hidden bg-[#020203] text-zinc-300 selection:bg-lime-300/30"
+      style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}
+    >
       <canvas ref={canvasRef} className="hidden" />
 
       <input
         ref={fileInputRef}
         type="file"
         className="hidden"
-        accept="image/*,audio/*,video/*,.txt,.md,.json,.csv,.html,.css,.js,.jsx,.ts,.tsx,.py,.xml,.yaml,.yml,.log,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) handleAttachFile(file);
@@ -3466,8 +3474,18 @@ ${textPreview}`
 
       <AnimatePresence>
         {isVideoEnabled && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-40 bg-black">
-            <video ref={videoRef} playsInline muted className={`h-full w-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`} />
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-40 bg-black"
+          >
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              className={`h-full w-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+            />
 
             <div className="absolute left-6 top-6 flex items-center gap-2 rounded-full border border-lime-300/20 bg-black/60 px-3 py-1.5 backdrop-blur-md">
               <span className="h-2 w-2 animate-pulse rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,242,100,0.9)]" />
@@ -3475,23 +3493,41 @@ ${textPreview}`
             </div>
 
             <div className="pointer-events-auto absolute bottom-8 left-1/2 flex -translate-x-1/2 items-center gap-4">
-              <button onClick={switchCamera} className="rounded-full border border-white/10 bg-black/60 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 backdrop-blur-xl transition hover:border-lime-300/40 hover:text-lime-200">
+              <button
+                onClick={switchCamera}
+                className="rounded-full border border-white/10 bg-black/60 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 backdrop-blur-xl transition hover:border-lime-300/40 hover:text-lime-200"
+              >
                 Flip Camera
               </button>
 
-              <button onClick={capturePhoto} className="flex items-center gap-2 rounded-full border border-lime-300/30 bg-lime-300/15 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 backdrop-blur-xl transition hover:bg-lime-300/25">
+              <button
+                onClick={capturePhoto}
+                className="flex items-center gap-2 rounded-full border border-lime-300/30 bg-lime-300/15 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 backdrop-blur-xl transition hover:bg-lime-300/25"
+              >
                 <Camera className="h-4 w-4" /> Capture
               </button>
 
-              <button onClick={toggleVideo} className="rounded-full border border-red-500/30 bg-red-500/15 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-red-300 backdrop-blur-xl transition hover:bg-red-500/25">
+              <button
+                onClick={toggleVideo}
+                className="rounded-full border border-red-500/30 bg-red-500/15 px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-red-300 backdrop-blur-xl transition hover:bg-red-500/25"
+              >
                 Close Camera
               </button>
             </div>
 
             <AnimatePresence>
               {currentTranscript && (
-                <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="pointer-events-none absolute left-1/2 top-[106px] z-50 w-[92vw] max-w-5xl -translate-x-1/2">
-                  <OneLineStreamingTranscript role={currentTranscript.role} text={currentTranscript.text} name={settings.agentName} />
+                <motion.div
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  className="pointer-events-none absolute left-1/2 top-[106px] z-50 w-[92vw] max-w-5xl -translate-x-1/2"
+                >
+                  <OneLineStreamingTranscript
+                    role={currentTranscript.role}
+                    text={currentTranscript.text}
+                    name={settings.agentName}
+                  />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -3504,7 +3540,6 @@ ${textPreview}`
           <button onClick={() => setShowSidebar(true)} className="-ml-2 rounded-xl border border-white/10 p-2 text-zinc-400 transition-all hover:bg-white/5 hover:text-white">
             <Menu className="h-5 w-5" />
           </button>
-
           <div className="hidden items-center gap-3 sm:flex">
             <img src={EBURON_LOGO_URL} alt="Eburon" className="h-8 w-8 rounded-full object-cover" />
             <div className="leading-none">
@@ -3527,7 +3562,9 @@ ${textPreview}`
         <div className="flex items-center gap-6">
           <div className="mr-2 hidden flex-col items-end sm:flex">
             <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-600">Voice</span>
-            <span className="flex items-center gap-1.5 font-mono text-[10px] text-lime-300">{selectedVoiceMeta.alias}</span>
+            <span className="flex items-center gap-1.5 font-mono text-[10px] text-lime-300">
+              {selectedVoiceMeta.alias}
+            </span>
           </div>
 
           <button onClick={() => setShowProfile(true)} className="h-10 w-10 overflow-hidden rounded-full border border-white/10 transition-all hover:border-lime-300/50 focus:outline-none focus:ring-2 focus:ring-lime-300/50">
@@ -3549,12 +3586,26 @@ ${textPreview}`
             <div className="absolute left-0 right-0 top-1/2 h-px bg-gradient-to-r from-transparent via-lime-300/[0.04] to-transparent" />
           </div>
 
-          <LimeVoiceOrb isActive={isActive} isAgentSpeaking={isAgentSpeaking} speakerLevel={speakerLevel} speakerBands={speakerBands} />
+          <LimeVoiceOrb
+            isActive={isActive}
+            isAgentSpeaking={isAgentSpeaking}
+            speakerLevel={speakerLevel}
+            speakerBands={speakerBands}
+          />
 
           <AnimatePresence>
             {currentTranscript && (
-              <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="pointer-events-none absolute left-1/2 top-[340px] z-50 w-[92vw] max-w-5xl -translate-x-1/2">
-                <OneLineStreamingTranscript role={currentTranscript.role} text={currentTranscript.text} name={settings.agentName} />
+              <motion.div
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                className="absolute left-1/2 top-[340px] z-50 w-[92vw] max-w-5xl -translate-x-1/2"
+              >
+                <OneLineStreamingTranscript
+                  role={currentTranscript.role}
+                  text={currentTranscript.text}
+                  name={settings.agentName}
+                />
               </motion.div>
             )}
           </AnimatePresence>
@@ -3563,7 +3614,14 @@ ${textPreview}`
             <div className="mb-4 w-full max-w-md space-y-2 px-6">
               <AnimatePresence>
                 {tasks.map(task => (
-                  <motion.div key={task.id} layout initial={{ opacity: 0, x: -50, scale: 0.9 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 50, transition: { duration: 0.2 } }} className="flex items-center gap-4 rounded-xl border border-l-2 border-white/5 border-l-lime-300/50 bg-[#0A0A0B]/80 p-3 shadow-2xl backdrop-blur-xl">
+                  <motion.div
+                    key={task.id}
+                    layout
+                    initial={{ opacity: 0, x: -50, scale: 0.9 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: 50, transition: { duration: 0.2 } }}
+                    className="flex items-center gap-4 rounded-xl border border-l-2 border-white/5 border-l-lime-300/50 bg-[#0A0A0B]/80 p-3 shadow-2xl backdrop-blur-xl"
+                  >
                     <div className="relative shrink-0">
                       {task.status === 'processing' ? (
                         <Loader2 className="h-4 w-4 animate-spin text-lime-300" />
@@ -3583,20 +3641,33 @@ ${textPreview}`
                       </div>
                       <p className="truncate text-xs text-zinc-100">{task.action}</p>
                       {task.result && (
-                        <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="mt-1 text-[10px] leading-tight text-zinc-400">
+                        <motion.p
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          className="mt-1 text-[10px] leading-tight text-zinc-400"
+                        >
                           {task.result}
                         </motion.p>
                       )}
                     </div>
 
                     {task.htmlPreviewData && task.htmlPreviewFilename && (
-                      <a href={task.htmlPreviewData} target="_blank" rel="noreferrer" className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10">
+                      <a
+                        href={task.htmlPreviewData}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"
+                      >
                         <ExternalLink className="h-4 w-4" />
                       </a>
                     )}
 
                     {task.downloadData && task.downloadFilename && (
-                      <a href={task.downloadData} download={task.downloadFilename} className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10">
+                      <a
+                        href={task.downloadData}
+                        download={task.downloadFilename}
+                        className="pointer-events-auto rounded-lg border border-lime-300/20 p-2 text-lime-200 hover:bg-lime-300/10"
+                      >
                         <Download className="h-4 w-4" />
                       </a>
                     )}
@@ -3607,21 +3678,41 @@ ${textPreview}`
 
             <div className="pointer-events-auto flex flex-col items-center justify-center gap-4">
               <div className="flex items-center justify-center gap-8">
-                <button onClick={() => setIsMuted(p => !p)} className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${
-                  isMuted ? 'border-red-500/30 bg-red-500/10 text-red-500' : 'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'
-                }`}>
+                <button
+                  onClick={() => setIsMuted(p => !p)}
+                  className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${
+                    isMuted ? 'border-red-500/30 bg-red-500/10 text-red-500' : 'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'
+                  }`}
+                >
                   {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
                 </button>
 
                 {!isActive ? (
-                  <StartIconMicVisualizer isActive={false} connecting={connecting} isMuted={isMuted} micLevel={0} micBands={micBands} onClick={() => startSession()} />
+                  <StartIconMicVisualizer
+                    isActive={false}
+                    connecting={connecting}
+                    isMuted={isMuted}
+                    micLevel={0}
+                    micBands={micBands}
+                    onClick={() => startSession()}
+                  />
                 ) : (
-                  <StartIconMicVisualizer isActive={true} connecting={connecting} isMuted={isMuted} micLevel={micLevel} micBands={micBands} onClick={stopSession} />
+                  <StartIconMicVisualizer
+                    isActive={true}
+                    connecting={connecting}
+                    isMuted={isMuted}
+                    micLevel={micLevel}
+                    micBands={micBands}
+                    onClick={stopSession}
+                  />
                 )}
 
-                <button onClick={() => toggleVideo()} className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${
-                  isVideoEnabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'
-                }`}>
+                <button
+                  onClick={() => toggleVideo()}
+                  className={`flex h-12 w-12 items-center justify-center rounded-full border shadow-lg transition-all ${
+                    isVideoEnabled ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-white/10 bg-[#0A0A0B] text-zinc-400 hover:border-white/30 hover:text-white'
+                  }`}
+                >
                   {isVideoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
                 </button>
               </div>
@@ -3633,8 +3724,15 @@ ${textPreview}`
       <AnimatePresence>
         {showSidebar && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowSidebar(false)} className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm" />
-            <motion.div initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }} className="fixed bottom-0 left-0 top-0 z-[101] flex w-96 max-w-[88vw] flex-col border-r border-white/10 bg-[#0A0A0B] shadow-2xl">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowSidebar(false)}
+              className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed bottom-0 left-0 top-0 z-[101] flex w-96 max-w-[88vw] flex-col border-r border-white/10 bg-[#0A0A0B] shadow-2xl"
+            >
               <div className="flex items-center justify-between border-b border-white/10 p-6">
                 <div>
                   <h2 className="text-sm font-bold uppercase tracking-widest text-white">Office History</h2>
@@ -3646,32 +3744,54 @@ ${textPreview}`
               </div>
 
               <div className="grid grid-cols-2 gap-3 border-b border-white/10 p-4">
-                <button onClick={() => fileInputRef.current?.click()} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-lime-300/20 bg-lime-300/10 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-lime-300/20 bg-lime-300/10 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"
+                >
                   <Paperclip className="h-4 w-4" />
                   Attach
                 </button>
 
-                <button onClick={() => setChatInput('Build ')} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10">
+                <button
+                  onClick={() => setChatInput('Build ')}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10"
+                >
                   <Code2 className="h-4 w-4" />
                   Build
                 </button>
               </div>
 
               <div className="flex min-h-0 flex-1 flex-col">
-                <div ref={chatScrollRef} className="flex-1 space-y-3 overflow-y-auto p-4 pb-3">
-                  {chatMessagesWithStreaming.map((msg, i) => (
-                    <div key={`${msg.timestamp}-${i}-${msg.streaming ? 'streaming' : 'saved'}`} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                      <span className="mb-1 flex items-center gap-2 text-[8px] uppercase tracking-widest text-zinc-600">
+                <div className="flex-1 space-y-3 overflow-y-auto p-4 pb-3 scroll-smooth">
+                  {historyMsgs.map((msg, i) => (
+                    <div key={`${msg.timestamp}-${i}`} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      <span className="mb-1 text-[8px] uppercase tracking-widest text-zinc-600">
                         {msg.role === 'user' ? settings.userName : settings.agentName}
-                        {msg.streaming && <span className={`rounded-full border px-1.5 py-0.5 text-[7px] ${msg.role === 'user' ? 'border-sky-400/30 text-sky-300' : 'border-lime-300/30 text-lime-300'}`}>Live</span>}
                       </span>
 
                       <div className={`max-w-[92%] rounded-2xl p-3 text-xs leading-relaxed ${
                         msg.role === 'user'
                           ? 'rounded-tr-sm border border-sky-400/20 bg-sky-400/10 text-sky-100'
                           : 'rounded-tl-sm border border-lime-300/10 bg-white/5 text-zinc-300'
-                      } ${msg.streaming ? 'animate-pulse' : ''}`}>
-                        <ChatAttachmentPreview msg={msg} />
+                      }`}>
+                        {msg.fileName && (
+                          <div className="mb-2 flex items-center gap-2 rounded-xl bg-black/30 px-2 py-1 text-[10px] text-lime-200">
+                            <Upload className="h-3 w-3" />
+                            {msg.fileName}
+                          </div>
+                        )}
+
+                        {/* RENDER THE UPLOADED FILE PREVIEWS INSIDE THE MESSAGE BUBBLE */}
+                        {msg.previewUrl && (
+                          <div className="mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/50 shadow-md">
+                            <img src={msg.previewUrl} alt="Thumbnail preview" className="max-h-48 w-full object-contain" />
+                          </div>
+                        )}
+                        {msg.previewText && (
+                          <div className="mb-2 max-h-32 overflow-y-auto rounded border border-white/5 bg-black/40 p-2 font-mono text-[9px] text-zinc-300 shadow-inner">
+                            <pre className="whitespace-pre-wrap break-words">{msg.previewText}</pre>
+                          </div>
+                        )}
 
                         {msg.toolName && (
                           <div className="mb-2 flex items-center gap-2 rounded-xl bg-lime-300/10 px-2 py-1 text-[10px] text-lime-200">
@@ -3684,12 +3804,21 @@ ${textPreview}`
 
                         {msg.htmlPreviewData && msg.htmlPreviewFilename && (
                           <div className="mt-3 grid grid-cols-1 gap-2">
-                            <a href={msg.htmlPreviewData} target="_blank" rel="noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15">
+                            <a
+                              href={msg.htmlPreviewData}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"
+                            >
                               <ExternalLink className="h-3.5 w-3.5" />
                               Open HTML Preview
                             </a>
 
-                            <a href={msg.htmlPreviewData} download={msg.htmlPreviewFilename} className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10">
+                            <a
+                              href={msg.htmlPreviewData}
+                              download={msg.htmlPreviewFilename}
+                              className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-200 transition hover:bg-white/10"
+                            >
                               <Download className="h-3.5 w-3.5" />
                               Download HTML
                             </a>
@@ -3697,7 +3826,11 @@ ${textPreview}`
                         )}
 
                         {msg.downloadData && msg.downloadFilename && (
-                          <a href={msg.downloadData} download={msg.downloadFilename} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15">
+                          <a
+                            href={msg.downloadData}
+                            download={msg.downloadFilename}
+                            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-lime-200 transition hover:bg-lime-300/15"
+                          >
                             <Download className="h-3.5 w-3.5" />
                             Download Result
                           </a>
@@ -3706,22 +3839,64 @@ ${textPreview}`
                     </div>
                   ))}
 
-                  {chatMessagesWithStreaming.length === 0 && (
+                  <AnimatePresence>
+                    {currentTranscript && (
+                      <motion.div
+                        key={`live-${currentTranscript.role}`}
+                        initial={{ opacity: 0, x: -20, scale: 0.95 }}
+                        animate={{ opacity: 1, x: 0, scale: 1 }}
+                        exit={{ opacity: 0, x: 20, scale: 0.95, transition: { duration: 0.15 } }}
+                        className={`flex flex-col ${currentTranscript.role === 'user' ? 'items-end' : 'items-start'}`}
+                      >
+                        <span className="mb-1 flex items-center gap-1.5 text-[8px] uppercase tracking-widest text-zinc-500">
+                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                          LIVE {currentTranscript.role === 'user' ? settings.userName : settings.agentName}
+                        </span>
+
+                        <div className={`max-w-[92%] rounded-2xl border border-dashed p-3 text-xs leading-relaxed ${
+                          currentTranscript.role === 'user'
+                            ? 'rounded-tr-sm border-sky-400/20 bg-sky-400/5 text-sky-100'
+                            : 'rounded-tl-sm border-lime-300/10 bg-white/5 text-zinc-300'
+                        }`}>
+                          {currentTranscript.text}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {historyMsgs.length === 0 && !currentTranscript && (
                     <div className="py-10 text-center text-[10px] font-bold uppercase tracking-widest text-zinc-600">
                       No Office History Yet
                     </div>
                   )}
                 </div>
 
-                <form onSubmit={sendChatMessage} className="border-t border-white/10 bg-[#070807]/95 p-3 backdrop-blur-xl">
+                <form
+                  onSubmit={sendChatMessage}
+                  className="border-t border-white/10 bg-[#070807]/95 p-3 backdrop-blur-xl"
+                >
                   <div className="flex items-center gap-2 rounded-2xl border border-lime-300/15 bg-black/45 p-2 shadow-2xl">
-                    <button type="button" onClick={() => fileInputRef.current?.click()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-zinc-400 transition hover:border-lime-300/30 hover:text-lime-200">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-zinc-400 transition hover:border-lime-300/30 hover:text-lime-200"
+                    >
                       <Paperclip className="h-4 w-4" />
                     </button>
 
-                    <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder={`Message ${settings.agentName}...`} className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm text-white outline-none placeholder:text-zinc-600" style={{ fontFamily: 'Roboto, system-ui, sans-serif' }} />
+                    <input
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder={`Message ${settings.agentName}...`}
+                      className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm text-white outline-none placeholder:text-zinc-600"
+                      style={{ fontFamily: 'Roboto, system-ui, sans-serif' }}
+                    />
 
-                    <button type="submit" disabled={!chatInput.trim()} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-lime-300 text-black transition hover:bg-lime-200 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40">
+                    <button
+                      type="submit"
+                      disabled={!chatInput.trim()}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-lime-300 text-black transition hover:bg-lime-200 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
                       <Send className="h-4 w-4" />
                     </button>
                   </div>
@@ -3734,9 +3909,13 @@ ${textPreview}`
 
       <AnimatePresence>
         {showProfile && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed inset-0 z-[200] flex flex-col overflow-y-auto bg-[#050505]">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
+            className="fixed inset-0 z-[200] flex flex-col overflow-y-auto bg-[#050505]"
+          >
             <div className="sticky top-0 z-10 mx-auto flex w-full max-w-2xl items-center justify-between border-b border-white/10 bg-[#050505]/80 p-6 backdrop-blur-xl">
               <h2 className="text-sm font-bold uppercase tracking-widest text-white">Office Profile</h2>
+
               <button onClick={() => setShowProfile(false)} className="rounded-xl bg-white/5 p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white">
                 <X className="h-5 w-5" />
               </button>
@@ -3750,11 +3929,9 @@ ${textPreview}`
                   ) : (
                     <div className="text-4xl font-bold text-zinc-700">{settings.userName?.[0] || 'U'}</div>
                   )}
-
                   <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
                     <Camera className="h-8 w-8 text-white drop-shadow-md" />
                   </div>
-
                   <input
                     type="file"
                     accept="image/*"
@@ -3800,7 +3977,13 @@ ${textPreview}`
                     <UserRound className="h-3.5 w-3.5" />
                     How should Beatrice address you?
                   </label>
-                  <input type="text" value={settings.userName} onChange={(e) => setSettings(s => ({ ...s, userName: e.target.value }))} className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-xl font-medium text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50" placeholder="e.g. Jo Lernout" />
+                  <input
+                    type="text"
+                    value={settings.userName}
+                    onChange={(e) => setSettings(s => ({ ...s, userName: e.target.value }))}
+                    className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-xl font-medium text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
+                    placeholder="e.g. Jo Lernout"
+                  />
                 </div>
 
                 <div className="space-y-2">
@@ -3808,12 +3991,22 @@ ${textPreview}`
                     <Bot className="h-3.5 w-3.5" />
                     Persona Name
                   </label>
-                  <input type="text" value={settings.agentName} onChange={(e) => setSettings(s => ({ ...s, agentName: e.target.value }))} className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-xl font-medium text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50" placeholder="e.g. Beatrice" />
+                  <input
+                    type="text"
+                    value={settings.agentName}
+                    onChange={(e) => setSettings(s => ({ ...s, agentName: e.target.value }))}
+                    className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-xl font-medium text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
+                    placeholder="e.g. Beatrice"
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Voice Alias</label>
-                  <select value={settings.selectedVoice} onChange={(e) => setSettings(s => ({ ...s, selectedVoice: e.target.value }))} className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-sm text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50">
+                  <select
+                    value={settings.selectedVoice}
+                    onChange={(e) => setSettings(s => ({ ...s, selectedVoice: e.target.value }))}
+                    className="w-full rounded-xl border border-white/10 bg-[#0A0A0B] p-4 text-sm text-white outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
+                  >
                     {GEMINI_LIVE_VOICE_OPTIONS.map(v => (
                       <option key={v.id} value={v.id}>
                         {v.alias} — {v.vibe}
@@ -3824,7 +4017,12 @@ ${textPreview}`
 
                 <div className="flex flex-1 flex-col space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Default Persona Instructions</label>
-                  <textarea value={settings.personality} onChange={(e) => setSettings(s => ({ ...s, personality: e.target.value }))} className="min-h-[340px] w-full resize-y rounded-xl border border-white/10 bg-[#0A0A0B] p-4 font-mono text-xs leading-relaxed text-zinc-300 outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50" placeholder="Describe how the agent should behave..." />
+                  <textarea
+                    value={settings.personality}
+                    onChange={(e) => setSettings(s => ({ ...s, personality: e.target.value }))}
+                    className="min-h-[340px] w-full resize-y rounded-xl border border-white/10 bg-[#0A0A0B] p-4 font-mono text-xs leading-relaxed text-zinc-300 outline-none transition-all focus:border-lime-300/50 focus:ring-1 focus:ring-lime-300/50"
+                    placeholder="Describe how the agent should behave..."
+                  />
                   <p className="text-[10px] leading-relaxed text-zinc-600">
                     The hidden office-behavior prompt stays applied behind this editable persona.
                   </p>
@@ -3837,7 +4035,10 @@ ${textPreview}`
                 <button onClick={onLogout} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-500/10 px-4 py-3 text-xs font-bold uppercase tracking-widest text-red-500 transition-all hover:bg-red-500/20 active:scale-95">
                   <LogOut className="h-4 w-4" /> Logout
                 </button>
-                <button onClick={persistSettings} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-lime-300 px-4 py-3 text-xs font-bold uppercase tracking-widest text-black transition-all hover:bg-lime-200 active:scale-95">
+                <button
+                  onClick={persistSettings}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-lime-300 px-4 py-3 text-xs font-bold uppercase tracking-widest text-black transition-all hover:bg-lime-200 active:scale-95"
+                >
                   <Save className="h-4 w-4" /> Save
                 </button>
               </div>
