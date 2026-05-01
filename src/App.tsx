@@ -69,8 +69,6 @@ interface ChatMessage {
   downloadFilename?: string;
   htmlPreviewData?: string;
   htmlPreviewFilename?: string;
-  previewUrl?: string;
-  previewText?: string;
 }
 
 interface ActionTask {
@@ -99,7 +97,7 @@ const EBURON_LOGO_URL = 'https://eburon.ai/icon-eburon.svg';
 const PRODUCT_BRAND = 'VEP';
 const PRODUCT_FULL_NAME = 'Virtual Employee Persona';
 
-const GEMINI_LIVE_VOICE_OPTIONS =[
+const GEMINI_LIVE_VOICE_OPTIONS = [
   { alias: 'Superman', id: 'Charon', vibe: 'deep, steady, grounded' },
   { alias: 'Wonder Woman', id: 'Kore', vibe: 'clear, composed, warm' },
   { alias: 'Batman', id: 'Fenrir', vibe: 'dark, firm, serious' },
@@ -194,25 +192,7 @@ const DEFAULT_SETTINGS: AgentSettings = {
   selectedVoice: 'Kore',
 };
 
-const LIVE_RUNTIME = {
-  generation: 0,
-  ownerId: '',
-  startPromise: null as Promise<boolean> | null,
-  session: null as any,
-  audioRecorder: null as AudioRecorder | null,
-  audioStreamer: null as AudioStreamer | null,
-  isClosing: false,
-  visStream: null as MediaStream | null,
-  visCtx: null as AudioContext | null,
-  visAnalyser: null as AnalyserNode | null,
-};
-
-function isClosedSocketError(error: any) {
-  const message = String(error?.message || error || '').toLowerCase();
-  return message.includes('closing') || message.includes('closed') || message.includes('websocket');
-}
-
-const GOOGLE_SERVICE_TOOLS =[
+const GOOGLE_SERVICE_TOOLS = [
   {
     name: 'render_web_artifact',
     description:
@@ -263,7 +243,7 @@ const GOOGLE_SERVICE_TOOLS =[
         saveToDrive: { type: Type.BOOLEAN, description: 'If true, upload the HTML document to the user drive.' },
         emailTo: { type: Type.STRING, description: 'Optional email address to send the HTML document to. Use current_user if requested.' },
       },
-      required:['title', 'html'],
+      required: ['title', 'html'],
     },
   },
   {
@@ -276,7 +256,7 @@ const GOOGLE_SERVICE_TOOLS =[
         query: { type: Type.STRING, description: 'Mail search query, sender, subject, or keyword.' },
         limit: { type: Type.NUMBER, description: 'Maximum number of messages to fetch.' },
       },
-      required:[],
+      required: [],
     },
   },
   {
@@ -319,7 +299,7 @@ const GOOGLE_SERVICE_TOOLS =[
         timeMin: { type: Type.STRING, description: 'Optional start datetime.' },
         timeMax: { type: Type.STRING, description: 'Optional end datetime.' },
       },
-      required:[],
+      required: [],
     },
   },
   {
@@ -353,7 +333,7 @@ const GOOGLE_SERVICE_TOOLS =[
         location: { type: Type.STRING, description: 'New event location.' },
         description: { type: Type.STRING, description: 'New event description.' },
       },
-      required:[],
+      required: [],
     },
   },
   {
@@ -379,7 +359,7 @@ const GOOGLE_SERVICE_TOOLS =[
         fileName: { type: Type.STRING, description: 'File name or search term if id is unknown.' },
         exportMimeType: { type: Type.STRING, description: 'Optional export MIME type, e.g. application/pdf or text/plain.' },
       },
-      required:[],
+      required: [],
     },
   },
   {
@@ -434,7 +414,7 @@ const GOOGLE_SERVICE_TOOLS =[
         range: { type: Type.STRING, description: 'Sheet range, for example Sheet1!A1:D10.' },
         query: { type: Type.STRING, description: 'File name or search query if id unknown.' },
       },
-      required:[],
+      required: [],
     },
   },
   {
@@ -470,7 +450,7 @@ const GOOGLE_SERVICE_TOOLS =[
       properties: {
         listId: { type: Type.STRING, description: 'Optional task list id, defaults to @default.' },
       },
-      required:[],
+      required: [],
     },
   },
   {
@@ -668,119 +648,42 @@ function makeHtmlArtifactFile(html: string, filenameBase: string) {
 function makeBlobDownloadData(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
 }
 
-function utf8ToBase64(value: string) {
+// --- Improved base64 / MIME helpers (fixes email encoding) ---
+function stringToBase64(value: string): string {
   const bytes = new TextEncoder().encode(value);
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
+  bytes.forEach(byte => binary += String.fromCharCode(byte));
   return btoa(binary);
 }
 
+function splitBase64ForMime(base64: string): string {
+  const chunkSize = 76;
+  const chunks: string[] = [];
+  for (let i = 0; i < base64.length; i += chunkSize) {
+    chunks.push(base64.substring(i, i + chunkSize));
+  }
+  return chunks.join('\r\n');
+}
+
 function base64UrlEncode(value: string) {
-  return utf8ToBase64(value)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
+  const base64 = stringToBase64(value);
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-function sanitizeEmailHeader(value: string) {
-  return String(value || '').replace(/[\r\n]+/g, ' ').trim();
-}
-
-function encodeEmailSubject(value: string) {
-  const clean = sanitizeEmailHeader(value);
-  if (/^[\x00-\x7F]*$/.test(clean)) return clean;
-  return `=?UTF-8?B?${utf8ToBase64(clean)}?=`;
-}
-
-function chunkBase64(value: string) {
-  return String(value || '').replace(/.{1,76}/g, '$&\r\n').trim();
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer) {
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
   let binary = '';
   const bytes = new Uint8Array(buffer);
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
-}
-
-async function generateFileThumbnail(file: File, type: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    if (type.startsWith('image/')) {
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => {
-        const c = document.createElement('canvas');
-        let { width: w, height: h } = img;
-        const max = 512;
-        if (w > max || h > max) {
-          const r = Math.min(max / w, max / h);
-          w = Math.round(w * r);
-          h = Math.round(h * r);
-        }
-        c.width = w; c.height = h;
-        const ctx = c.getContext('2d');
-        ctx?.drawImage(img, 0, 0, w, h);
-        resolve(c.toDataURL('image/jpeg', 0.7));
-        URL.revokeObjectURL(url);
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(null);
-      };
-      img.src = url;
-    } else if (type.startsWith('video/')) {
-      const url = URL.createObjectURL(file);
-      const video = document.createElement('video');
-      video.src = url;
-      video.muted = true;
-      video.playsInline = true;
-      video.currentTime = 1;
-      
-      const handleSeek = () => {
-        const c = document.createElement('canvas');
-        let { videoWidth: w, videoHeight: h } = video;
-        if (w === 0 || h === 0) {
-          resolve(null);
-          URL.revokeObjectURL(url);
-          return;
-        }
-        const max = 512;
-        if (w > max || h > max) {
-          const r = Math.min(max / w, max / h);
-          w = Math.round(w * r);
-          h = Math.round(h * r);
-        }
-        c.width = w; c.height = h;
-        const ctx = c.getContext('2d');
-        ctx?.drawImage(video, 0, 0, w, h);
-        resolve(c.toDataURL('image/jpeg', 0.7));
-        URL.revokeObjectURL(url);
-      };
-      
-      video.onloadeddata = () => {
-         if (video.duration > 0 && video.duration < 1) {
-            video.currentTime = video.duration / 2;
-         }
-      };
-      video.onseeked = handleSeek;
-      video.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(null);
-      };
-    } else {
-      resolve(null);
-    }
-  });
 }
 
 function buildEmailRaw({
@@ -802,44 +705,40 @@ function buildEmailRaw({
     base64Content: string;
   };
 }) {
-  const attachmentBase64Lines = attachment ? chunkBase64(attachment.base64Content) : '';
+  const attachmentBase64Lines = attachment ? splitBase64ForMime(attachment.base64Content) : '';
 
-  const headers =[
-    `To: ${sanitizeEmailHeader(to)}`,
-    cc ? `Cc: ${sanitizeEmailHeader(cc)}` : '',
-    bcc ? `Bcc: ${sanitizeEmailHeader(bcc)}` : '',
-    `Subject: ${encodeEmailSubject(subject)}`,
+  const headers = [
+    `To: ${to}`,
+    cc ? `Cc: ${cc}` : '',
+    bcc ? `Bcc: ${bcc}` : '',
+    `Subject: ${subject}`,
     'MIME-Version: 1.0',
   ].filter(Boolean);
 
   if (!attachment) {
-    const raw =[
+    const raw = [
       ...headers,
       'Content-Type: text/plain; charset="UTF-8"',
-      'Content-Transfer-Encoding: 8bit',
       '',
       body,
     ].join('\r\n');
-
     return base64UrlEncode(raw);
   }
 
   const boundary = `boundary_${Date.now()}`;
-
-  const raw =[
+  const raw = [
     ...headers,
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     '',
     `--${boundary}`,
     'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: 8bit',
     '',
     body,
     '',
     `--${boundary}`,
-    `Content-Type: ${attachment.mimeType}; name="${sanitizeEmailHeader(attachment.filename)}"`,
+    `Content-Type: ${attachment.mimeType}; name="${attachment.filename}"`,
     'Content-Transfer-Encoding: base64',
-    `Content-Disposition: attachment; filename="${sanitizeEmailHeader(attachment.filename)}"`,
+    `Content-Disposition: attachment; filename="${attachment.filename}"`,
     '',
     attachmentBase64Lines,
     '',
@@ -1004,7 +903,7 @@ function LimeVoiceOrb({
     bandsRef.current = speakerBands;
     activeRef.current = isActive;
     speakingRef.current = isAgentSpeaking;
-  },[isActive, isAgentSpeaking, speakerBands, speakerLevel]);
+  }, [isActive, isAgentSpeaking, speakerBands, speakerLevel]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1034,7 +933,7 @@ function LimeVoiceOrb({
 
     const makeOrbPath = (cx: number, cy: number, radius: number, pulse: number, time: number) => {
       const path = new Path2D();
-      const points: Array<{ x: number; y: number }> =[];
+      const points: Array<{ x: number; y: number }> = [];
       const bands = bandsRef.current.length ? bandsRef.current : Array(20).fill(0);
       const live = activeRef.current && speakingRef.current;
       const count = 112;
@@ -1170,7 +1069,7 @@ function LimeVoiceOrb({
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  },[]);
+  }, []);
 
   return (
     <div className="relative flex h-72 w-72 items-center justify-center">
@@ -1196,7 +1095,7 @@ function StartIconMicVisualizer({
 }) {
   const innerBands = micBands?.length
     ? micBands.slice(5, 14)
-    :[0.35, 0.5, 0.72, 0.9, 1, 0.82, 0.64, 0.46, 0.32].map(n => n * micLevel);
+    : [0.35, 0.5, 0.72, 0.9, 1, 0.82, 0.64, 0.46, 0.32].map(n => n * micLevel);
 
   return (
     <button
@@ -1268,9 +1167,9 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authConfirmPassword, setAuthConfirmPassword] = useState('');
-  const[authBusy, setAuthBusy] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState<{ type: 'error' | 'success' | 'info'; text: string } | null>(null);
-  const[showAuthPassword, setShowAuthPassword] = useState(false);
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [showAuthConfirmPassword, setShowAuthConfirmPassword] = useState(false);
 
   useEffect(() => {
@@ -1283,7 +1182,7 @@ export default function App() {
       link.href = 'https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap';
       document.head.appendChild(link);
     }
-  },[]);
+  }, []);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -1340,7 +1239,7 @@ export default function App() {
     });
 
     return () => unsub();
-  },[]);
+  }, []);
 
   const getAuthErrorMessage = (error: any) => {
     const code = String(error?.code || '');
@@ -1405,8 +1304,7 @@ export default function App() {
     setAuthMessage(null);
 
     const email = authEmail.trim();
-    const password = authPassword;
-    const confirmPassword = authConfirmPassword;
+    const password = authPassword.trim();
     const fullName = authName.trim();
 
     try {
@@ -1434,7 +1332,7 @@ export default function App() {
           throw new Error('Use at least 6 characters for the password.');
         }
 
-        if (password !== confirmPassword) {
+        if (password !== authConfirmPassword.trim()) {
           throw new Error('Passwords do not match.');
         }
 
@@ -1665,23 +1563,20 @@ function BeatriceAgent({
   const [connecting, setConnecting] = useState(false);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
-  const[micBands, setMicBands] = useState<number[]>(Array(20).fill(0));
-  const[speakerLevel, setSpeakerLevel] = useState(0);
+  const [micBands, setMicBands] = useState<number[]>(Array(20).fill(0));
+  const [speakerLevel, setSpeakerLevel] = useState(0);
   const [speakerBands, setSpeakerBands] = useState<number[]>(Array(20).fill(0));
   const [tasks, setTasks] = useState<ActionTask[]>([]);
   const [historyContext, setHistoryContext] = useState<string>('');
-  const[historyMsgs, setHistoryMsgs] = useState<ChatMessage[]>([]);
-  
+  const [historyMsgs, setHistoryMsgs] = useState<ChatMessage[]>([]);
   const [currentTranscript, setCurrentTranscript] = useState<{ role: 'user' | 'model'; text: string } | null>(null);
-  const [liveUserText, setLiveUserText] = useState('');
-  const[liveModelText, setLiveModelText] = useState('');
 
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(false);
-  const[facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [showSidebar, setShowSidebar] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const[chatInput, setChatInput] = useState('');
+  const [chatInput, setChatInput] = useState('');
   const [settings, setSettings] = useState<AgentSettings>({
     ...DEFAULT_SETTINGS,
     ...initialSettings,
@@ -1691,7 +1586,7 @@ function BeatriceAgent({
   const sessionRef = useRef<any>(null);
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   const transcriptTimeoutRef = useRef<any>(null);
   const isMutedRef = useRef(false);
@@ -1708,25 +1603,13 @@ function BeatriceAgent({
   const lastSavedModelTranscriptRef = useRef('');
   const lastSavedUserTranscriptRef = useRef('');
 
-  const sessionGenerationRef = useRef(0);
-  const startPromiseRef = useRef<Promise<boolean> | null>(null);
-  const videoEnabledRef = useRef(false);
-  const videoStartingRef = useRef(false);
-  const ownerIdRef = useRef(`vep-owner-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-
   useEffect(() => {
     isMutedRef.current = isMuted;
-  },[isMuted]);
+  }, [isMuted]);
 
   useEffect(() => {
     isActiveRef.current = isActive;
   }, [isActive]);
-
-  useEffect(() => {
-    if (showSidebar) {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  },[historyMsgs, liveUserText, liveModelText, showSidebar]);
 
   useEffect(() => {
     let wakeLock: any = null;
@@ -1755,7 +1638,7 @@ function BeatriceAgent({
 
     const unsub = onValue(historyRef, (snap) => {
       const msgs: string[] = [];
-      const rawMsgs: ChatMessage[] =[];
+      const rawMsgs: ChatMessage[] = [];
 
       snap.forEach(child => {
         const m = child.val() as ChatMessage;
@@ -1775,14 +1658,13 @@ function BeatriceAgent({
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
     if (apiKey) aiRef.current = new GoogleGenAI({ apiKey });
 
-    audioStreamerRef.current = LIVE_RUNTIME.audioStreamer || new AudioStreamer();
-    LIVE_RUNTIME.audioStreamer = audioStreamerRef.current;
+    audioStreamerRef.current = new AudioStreamer();
 
     return () => {
       unsub();
       stopSession();
     };
-  },[user.uid]);
+  }, [user.uid]);
 
   const selectedVoiceMeta = useMemo(
     () => GEMINI_LIVE_VOICE_OPTIONS.find(v => v.id === settings.selectedVoice) || GEMINI_LIVE_VOICE_OPTIONS[0],
@@ -1814,7 +1696,6 @@ function BeatriceAgent({
     lastSavedModelTranscriptRef.current = clean;
     saveMessage('model', clean);
     modelTranscriptBufferRef.current = '';
-    setLiveModelText('');
   };
 
   const saveUserBuffer = () => {
@@ -1825,7 +1706,6 @@ function BeatriceAgent({
     lastSavedUserTranscriptRef.current = clean;
     saveMessage('user', clean);
     userTranscriptBufferRef.current = '';
-    setLiveUserText('');
   };
 
   const updateLiveTranscript = (role: 'user' | 'model', text: string, clearDelay = 3900) => {
@@ -1840,163 +1720,105 @@ function BeatriceAgent({
     }, clearDelay);
   };
 
-  const startMicVisualizer = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const ctx = new window.AudioContext();
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 64; 
-      source.connect(analyser);
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+  const startMicVisualizer = () => {
+    const tick = () => {
+      const recorder: any = audioRecorderRef.current;
+      const streamer: any = audioStreamerRef.current;
+      let nextLevel = 0;
+      let nextBands = Array(20).fill(0);
+      let nextSpeakerLevel = 0;
+      let nextSpeakerBands = Array(20).fill(0);
 
-      LIVE_RUNTIME.visStream = stream;
-      LIVE_RUNTIME.visCtx = ctx;
-      LIVE_RUNTIME.visAnalyser = analyser;
-
-      const tick = () => {
-        if (!isActiveRef.current) return;
-
-        let nextLevel = 0;
-        let nextBands = Array(20).fill(0);
-
-        if (analyser && !isMutedRef.current) {
-          analyser.getByteFrequencyData(dataArray);
-          const data = Array.from(dataArray).slice(0, 20); 
-          nextBands = data.map(v => v / 255);
-          nextLevel = Math.min(1, (nextBands.reduce((a, b) => a + b, 0) / 20) * 1.5);
+      try {
+        if (recorder && typeof recorder.getFrequencyBands === 'function') {
+          const bands = recorder.getFrequencyBands(20) || [];
+          nextBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
+          const frequencyAverage = nextBands.reduce((sum: number, n: number) => sum + n, 0) / Math.max(nextBands.length, 1);
+          const recorderLevel = typeof recorder.getLevel === 'function' ? recorder.getLevel() : 0;
+          nextLevel = Math.min(1, Math.max(recorderLevel, frequencyAverage * 1.8));
         } else if (isActiveRef.current && !isMutedRef.current) {
-          nextLevel = 0.04;
-          nextBands = Array(20).fill(0.02);
+          nextLevel = 0.06;
+          nextBands = Array(20).fill(0.04);
         }
+      } catch (e) {
+        nextLevel = 0;
+        nextBands = Array(20).fill(0);
+      }
 
-        let nextSpeakerLevel = 0;
-        let nextSpeakerBands = Array(20).fill(0);
-        try {
-          const streamer: any = audioStreamerRef.current;
-          if (streamer && typeof streamer.getFrequencyBands === 'function') {
-            const bands = streamer.getFrequencyBands(20) ||[];
-            nextSpeakerBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
-            const frequencyAverage = nextSpeakerBands.reduce((sum: number, n: number) => sum + n, 0) / 20;
-            const streamerLevel = typeof streamer.getLevel === 'function' ? streamer.getLevel() : 0;
-            nextSpeakerLevel = Math.min(1, Math.max(streamerLevel, frequencyAverage * 1.65));
-          }
-        } catch (e) {}
-
-        if (isMutedRef.current || !isActiveRef.current) {
-          nextLevel = 0;
-          nextBands = Array(20).fill(0);
+      try {
+        if (streamer && typeof streamer.getFrequencyBands === 'function') {
+          const bands = streamer.getFrequencyBands(20) || [];
+          nextSpeakerBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
+          const frequencyAverage = nextSpeakerBands.reduce((sum: number, n: number) => sum + n, 0) / Math.max(nextSpeakerBands.length, 1);
+          const streamerLevel = typeof streamer.getLevel === 'function' ? streamer.getLevel() : 0;
+          nextSpeakerLevel = Math.min(1, Math.max(streamerLevel, frequencyAverage * 1.65));
         }
+      } catch (e) {
+        nextSpeakerLevel = 0;
+        nextSpeakerBands = Array(20).fill(0);
+      }
 
-        if (!isActiveRef.current) {
-          nextSpeakerLevel = 0;
-          nextSpeakerBands = Array(20).fill(0);
-        }
+      if (isMutedRef.current || !isActiveRef.current) {
+        nextLevel = 0;
+        nextBands = Array(20).fill(0);
+      }
 
-        setMicLevel(prev => prev + (nextLevel - prev) * 0.46);
-        setMicBands(prev => nextBands.map((band, i) => prev[i] + (band - prev[i]) * 0.42));
-        setSpeakerLevel(prev => prev + (nextSpeakerLevel - prev) * 0.5);
-        setSpeakerBands(prev => nextSpeakerBands.map((band, i) => prev[i] + (band - prev[i]) * 0.48));
+      if (!isActiveRef.current) {
+        nextSpeakerLevel = 0;
+        nextSpeakerBands = Array(20).fill(0);
+      }
 
-        micAnimationFrameRef.current = requestAnimationFrame(tick);
-      };
+      setMicLevel(prev => prev + (nextLevel - prev) * 0.46);
+      setMicBands(prev => nextBands.map((band: number, i: number) => {
+        const current = prev[i] || 0;
+        return current + (band - current) * 0.42;
+      }));
+      setSpeakerLevel(prev => prev + (nextSpeakerLevel - prev) * 0.5);
+      setSpeakerBands(prev => nextSpeakerBands.map((band: number, i: number) => {
+        const current = prev[i] || 0;
+        return current + (band - current) * 0.48;
+      }));
+      micAnimationFrameRef.current = requestAnimationFrame(tick);
+    };
 
-      tick();
-    } catch (err) {
-      console.error('Visualizer Mic access failed', err);
-      const tickFallback = () => {
-        let nextSpeakerLevel = 0;
-        let nextSpeakerBands = Array(20).fill(0);
-        try {
-          const streamer: any = audioStreamerRef.current;
-          if (streamer && typeof streamer.getFrequencyBands === 'function') {
-            const bands = streamer.getFrequencyBands(20) ||[];
-            nextSpeakerBands = bands.map((n: number) => Math.min(1, Math.max(0, Number(n || 0))));
-            const frequencyAverage = nextSpeakerBands.reduce((sum: number, n: number) => sum + n, 0) / 20;
-            const streamerLevel = typeof streamer.getLevel === 'function' ? streamer.getLevel() : 0;
-            nextSpeakerLevel = Math.min(1, Math.max(streamerLevel, frequencyAverage * 1.65));
-          }
-        } catch (e) {}
-
-        setMicLevel(0);
-        setMicBands(Array(20).fill(0));
-        setSpeakerLevel(prev => prev + (nextSpeakerLevel - prev) * 0.5);
-        setSpeakerBands(prev => nextSpeakerBands.map((band, i) => prev[i] + (band - prev[i]) * 0.48));
-        micAnimationFrameRef.current = requestAnimationFrame(tickFallback);
-      };
-      tickFallback();
-    }
+    if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current);
+    micAnimationFrameRef.current = requestAnimationFrame(tick);
   };
 
   const stopMicVisualizer = () => {
     if (micAnimationFrameRef.current) cancelAnimationFrame(micAnimationFrameRef.current);
     micAnimationFrameRef.current = null;
-    
     setMicLevel(0);
     setMicBands(Array(20).fill(0));
     setSpeakerLevel(0);
     setSpeakerBands(Array(20).fill(0));
-
-    if (LIVE_RUNTIME.visStream) {
-      LIVE_RUNTIME.visStream.getTracks().forEach(t => t.stop());
-      LIVE_RUNTIME.visStream = null;
-    }
-    if (LIVE_RUNTIME.visCtx) {
-      LIVE_RUNTIME.visCtx.close().catch(()=>{});
-      LIVE_RUNTIME.visCtx = null;
-      LIVE_RUNTIME.visAnalyser = null;
-    }
   };
 
   const sendTextToLive = (text: string) => {
-    const session = sessionRef.current || LIVE_RUNTIME.session;
-    if (LIVE_RUNTIME.isClosing) return;
-    if (!session || typeof session.sendRealtimeInput !== 'function') return;
-
-    try {
-      session.sendRealtimeInput({ text });
-    } catch (error) {
-      if (!isClosedSocketError(error)) console.error('Live text send failed:', error);
-    }
+    if (!sessionRef.current || typeof sessionRef.current.sendRealtimeInput !== 'function') return;
+    sessionRef.current.sendRealtimeInput({ text });
   };
 
   const sendAudioToLive = (base64: string) => {
-    const session = sessionRef.current || LIVE_RUNTIME.session;
+    if (!sessionRef.current || typeof sessionRef.current.sendRealtimeInput !== 'function') return;
 
-    if (LIVE_RUNTIME.isClosing) return;
-    if (!isActiveRef.current) return;
-    if (isMutedRef.current) return;
-    if (!session || typeof session.sendRealtimeInput !== 'function') return;
-
-    try {
-      session.sendRealtimeInput({
-        audio: {
-          data: base64,
-          mimeType: 'audio/pcm;rate=16000',
-        },
-      });
-    } catch (error) {
-      if (!isClosedSocketError(error)) console.error('Live audio send failed:', error);
-    }
+    sessionRef.current.sendRealtimeInput({
+      audio: {
+        data: base64,
+        mimeType: 'audio/pcm;rate=16000',
+      },
+    });
   };
 
   const sendVideoToLive = (base64Data: string) => {
-    const session = sessionRef.current || LIVE_RUNTIME.session;
+    if (!sessionRef.current || typeof sessionRef.current.sendRealtimeInput !== 'function') return;
 
-    if (LIVE_RUNTIME.isClosing) return;
-    if (!isActiveRef.current) return;
-    if (!session || typeof session.sendRealtimeInput !== 'function') return;
-
-    try {
-      session.sendRealtimeInput({
-        video: {
-          data: base64Data,
-          mimeType: 'image/jpeg',
-        },
-      });
-    } catch (error) {
-      if (!isClosedSocketError(error)) console.error('Live video send failed:', error);
-    }
+    sessionRef.current.sendRealtimeInput({
+      video: {
+        data: base64Data,
+        mimeType: 'image/jpeg',
+      },
+    });
   };
 
   const sendChatMessage = (e?: FormEvent) => {
@@ -2019,11 +1841,12 @@ function BeatriceAgent({
     setChatInput('');
   };
 
+  // ---------- Google API helpers ----------
   const googleFetch = async (url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem('googleAccessToken');
 
     if (!token) {
-      throw new Error('Google services are not connected. Sign in with Google again from Profile.');
+      throw new Error('No access token. Reconnect permissions from Profile.');
     }
 
     const res = await fetch(url, {
@@ -2033,14 +1856,6 @@ function BeatriceAgent({
         ...(options.headers || {}),
       },
     });
-
-    if (res.status === 401 || res.status === 403) {
-      localStorage.removeItem('googleAccessToken');
-
-      throw new Error(
-        'Google permission expired or was revoked. Sign in with Google again from Profile to reconnect Gmail, Drive, and Calendar.'
-      );
-    }
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
@@ -2083,7 +1898,7 @@ function BeatriceAgent({
       await googleJson(`https://docs.googleapis.com/v1/documents/${doc.documentId}:batchUpdate`, {
         method: 'POST',
         body: JSON.stringify({
-          requests:[
+          requests: [
             {
               insertText: {
                 location: { index: 1 },
@@ -2164,6 +1979,7 @@ function BeatriceAgent({
     });
   };
 
+  // ---------- Tool execution ----------
   const executeGoogleTool = async (toolName: string, args: any) => {
     const executedAt = new Date().toISOString();
 
@@ -2204,7 +2020,7 @@ function BeatriceAgent({
             attachment: {
               filename: htmlFile.htmlPreviewFilename,
               mimeType: 'text/html',
-              base64Content: utf8ToBase64(htmlFile.html),
+              base64Content: stringToBase64(htmlFile.html),
             },
           });
         }
@@ -2232,12 +2048,12 @@ function BeatriceAgent({
         );
 
         const messages = await Promise.all(
-          (list.messages ||[]).map(async (m: any) => {
+          (list.messages || []).map(async (m: any) => {
             const msg = await googleJson(
               `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`
             );
 
-            const headers = msg.payload?.headers ||[];
+            const headers = msg.payload?.headers || [];
             const findHeader = (name: string) => headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
 
             return {
@@ -2255,13 +2071,10 @@ function BeatriceAgent({
       }
 
       case 'gmail_send': {
-        const to = args.to === 'current_user' ? getCurrentUserEmail() : args.to;
-        if (!to) throw new Error('Recipient email address is required.');
-
         const result = await sendGmail({
-          to,
-          subject: args.subject || 'No Subject',
-          body: args.body || '',
+          to: args.to,
+          subject: args.subject,
+          body: args.body,
           cc: args.cc,
           bcc: args.bcc,
         });
@@ -2270,13 +2083,10 @@ function BeatriceAgent({
       }
 
       case 'gmail_draft': {
-        const to = args.to === 'current_user' ? getCurrentUserEmail() : args.to;
-        if (!to) throw new Error('Recipient email address is required.');
-
         const raw = buildEmailRaw({
-          to,
-          subject: args.subject || 'No Subject',
-          body: args.body || '',
+          to: args.to,
+          subject: args.subject,
+          body: args.body,
           cc: args.cc,
           bcc: args.bcc,
         });
@@ -2295,7 +2105,7 @@ function BeatriceAgent({
           `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=20&timeMin=${encodeURIComponent(range.timeMin)}&timeMax=${encodeURIComponent(range.timeMax)}`
         );
 
-        return { toolName, executedAt, status: 'completed', range, events: events.items ||[] };
+        return { toolName, executedAt, status: 'completed', range, events: events.items || [] };
       }
 
       case 'calendar_create_event': {
@@ -2386,7 +2196,7 @@ function BeatriceAgent({
           `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name contains '${escaped}' and trashed = false${mimeClause}`)}&fields=files(id,name,mimeType,webViewLink,webContentLink,modifiedTime,size)&pageSize=${limit}`
         );
 
-        return { toolName, executedAt, status: 'completed', files: result.files ||[] };
+        return { toolName, executedAt, status: 'completed', files: result.files || [] };
       }
 
       case 'drive_read_file': {
@@ -2514,7 +2324,7 @@ function BeatriceAgent({
           await googleJson(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
             method: 'POST',
             body: JSON.stringify({
-              requests:[
+              requests: [
                 {
                   deleteContentRange: {
                     range: { startIndex: 1, endIndex: Math.max(1, endIndex - 1) },
@@ -2533,7 +2343,7 @@ function BeatriceAgent({
           await googleJson(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
             method: 'POST',
             body: JSON.stringify({
-              requests:[
+              requests: [
                 {
                   insertText: {
                     endOfSegmentLocation: {},
@@ -2567,7 +2377,7 @@ function BeatriceAgent({
           `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`
         );
 
-        return { toolName, executedAt, status: 'completed', spreadsheetId, range, values: result.values ||[] };
+        return { toolName, executedAt, status: 'completed', spreadsheetId, range, values: result.values || [] };
       }
 
       case 'sheets_update': {
@@ -2576,7 +2386,7 @@ function BeatriceAgent({
           {
             method: 'PUT',
             body: JSON.stringify({
-              values: Array.isArray(args.values) ? args.values : args.values?.values ||[],
+              values: Array.isArray(args.values) ? args.values : args.values?.values || [],
             }),
           }
         );
@@ -2596,7 +2406,7 @@ function BeatriceAgent({
       case 'tasks_list': {
         const listId = args.listId || '@default';
         const result = await googleJson(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks`);
-        return { toolName, executedAt, status: 'completed', tasks: result.items ||[] };
+        return { toolName, executedAt, status: 'completed', tasks: result.items || [] };
       }
 
       case 'tasks_create': {
@@ -2617,7 +2427,7 @@ function BeatriceAgent({
           `https://people.googleapis.com/v1/people:searchContacts?query=${encodeURIComponent(args.query)}&readMask=names,emailAddresses,phoneNumbers,organizations`
         );
 
-        return { toolName, executedAt, status: 'completed', contacts: result.results ||[] };
+        return { toolName, executedAt, status: 'completed', contacts: result.results || [] };
       }
 
       case 'meet_schedule': {
@@ -2657,7 +2467,7 @@ function BeatriceAgent({
           `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=${limit}&q=${encodeURIComponent(args.query)}`
         );
 
-        return { toolName, executedAt, status: 'completed', videos: result.items ||[] };
+        return { toolName, executedAt, status: 'completed', videos: result.items || [] };
       }
 
       case 'forms_create': {
@@ -2777,481 +2587,384 @@ function BeatriceAgent({
     }
   };
 
-  const stopVideoStream = (sendNotice = false) => {
-    if (videoIntervalRef.current) {
-      clearInterval(videoIntervalRef.current);
-      videoIntervalRef.current = null;
-    }
-
-    if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-    }
-
-    videoEnabledRef.current = false;
-    videoStartingRef.current = false;
-    setIsVideoEnabled(false);
-
-    if (sendNotice && sessionRef.current) {
-      setTimeout(() => {
-        sendTextToLive(`${settings.userName} closed the camera. Acknowledge it normally and keep the conversation going.`);
-      }, 150);
-    }
-  };
-
-  const startSession = async (options: { sendGreeting?: boolean } = {}): Promise<boolean> => {
-    const { sendGreeting = true } = options;
-
-    if (LIVE_RUNTIME.startPromise) {
-      startPromiseRef.current = LIVE_RUNTIME.startPromise;
-      return LIVE_RUNTIME.startPromise;
-    }
-
-    if (LIVE_RUNTIME.session && !LIVE_RUNTIME.isClosing) {
-      sessionRef.current = LIVE_RUNTIME.session;
-      audioRecorderRef.current = LIVE_RUNTIME.audioRecorder;
-      audioStreamerRef.current = LIVE_RUNTIME.audioStreamer;
-      isActiveRef.current = true;
-      setIsActive(true);
-      setConnecting(false);
-      startMicVisualizer();
-      return true;
-    }
-
-    const startPromise = (async () => {
-      if (!aiRef.current) {
-        alert('Gemini API key is missing. Make sure VITE_GEMINI_API_KEY is added in Vercel, then redeploy.');
-        return false;
-      }
-
-      const sessionGeneration = LIVE_RUNTIME.generation + 1;
-      LIVE_RUNTIME.generation = sessionGeneration;
-      LIVE_RUNTIME.ownerId = ownerIdRef.current;
-      LIVE_RUNTIME.isClosing = false;
-      sessionGenerationRef.current = sessionGeneration;
-
-      setConnecting(true);
-      modelTranscriptBufferRef.current = '';
-      userTranscriptBufferRef.current = '';
-      lastSavedModelTranscriptRef.current = '';
-      lastSavedUserTranscriptRef.current = '';
-      
-      setLiveUserText('');
-      setLiveModelText('');
-
-      try {
-        try { LIVE_RUNTIME.audioRecorder?.stop(); } catch (e) {}
-        try { audioRecorderRef.current?.stop(); } catch (e) {}
-        try { LIVE_RUNTIME.audioStreamer?.stop(); } catch (e) {}
-        try { audioStreamerRef.current?.stop(); } catch (e) {}
-        try { LIVE_RUNTIME.session?.close(); } catch (e) {}
-        try { sessionRef.current?.close(); } catch (e) {}
-
-        LIVE_RUNTIME.audioRecorder = null;
-        LIVE_RUNTIME.session = null;
-        audioRecorderRef.current = null;
-        sessionRef.current = null;
-
-        const streamer = new AudioStreamer();
-        LIVE_RUNTIME.audioStreamer = streamer;
-        audioStreamerRef.current = streamer;
-
-        await streamer.init(24000);
-
-        const hasGoogleServiceAccess = Boolean(localStorage.getItem('googleAccessToken'));
-
-        const systemInstruction =[
-          BASE_LIVE_AGENT_PROMPT,
-          BIBLE_PERSONALITY || '',
-          historyContext,
-          `Product brand: VEP, which means Virtual Employee Persona. Default persona: Beatrice, Boss Jo Lernout's secretary.`,
-          `User preferred name: ${settings.userName}.`,
-          `Agent visible name: ${settings.agentName}.`,
-          hasGoogleServiceAccess
-            ? `Authentication mode: Google account connected. Google services such as Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, Contacts, Forms, YouTube, and Analytics may be available through tools when the user asks.`
-            : `Authentication mode: email-only or Google services not connected. The voice assistant, chat history, profile, camera, file notes, and local app features are available, but Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, Contacts, Forms, YouTube, and Analytics are not available unless the user signs in with Google. If asked for those services, explain this normally and briefly.`,
-          `Relationship frame: ${settings.agentName} is working with ${settings.userName} as a private secretary and trusted office aide. If the user is Jo Lernout, ${settings.agentName} may respectfully call him "Meneer Jo" when it fits the moment. Start in English unless the user starts in another language. Dutch Flemish is available in a normal local office style, and the persona can switch to almost any language when needed.`,
-          `Agent personality overlay from settings page. This is customizable and must sit on top of the constant base prompt without replacing it: ${settings.personality}.`,
-          `Selected visible voice alias: ${selectedVoiceMeta.alias}. Internal voice id: ${selectedVoiceMeta.id}. Voice vibe: ${selectedVoiceMeta.vibe}. Do not mention the internal voice id unless asked by the developer.`,
-          `When asked to create, build, render, showcase, prototype, code, animate, make slides, make forms, make dashboards, make pages, make Three.js demos, or make printable documents, call render_web_artifact with a complete standalone HTML/CSS/JS file. Never just describe the code if the user wants it rendered or built.`,
-          `For HTML/CSS/JS artifacts, include all CSS in <style> and all JS in <script>. Make it directly openable. For slides, include navigation controls and keyboard support. For documents, include print CSS and a print button. For Three.js, load Three.js from a CDN and keep everything in one HTML file.`,
-        ].filter(Boolean).join('\n\n');
-
-        const session = await aiRef.current.live.connect({
-          model: LIVE_MODEL,
-          config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: settings.selectedVoice || 'Charon',
-                },
-              },
-            },
-            systemInstruction,
-            inputAudioTranscription: {},
-            outputAudioTranscription: {},
-            tools:[{
-              functionDeclarations: GOOGLE_SERVICE_TOOLS,
-            }],
-          },
-          callbacks: {
-            onopen: () => {
-              if (LIVE_RUNTIME.generation !== sessionGeneration) return;
-              console.log('Live session opened.');
-            },
-
-            onmessage: async (msg: LiveServerMessage) => {
-              if (LIVE_RUNTIME.generation !== sessionGeneration) return;
-
-              if (msg.toolCall) {
-                const calls = msg.toolCall.functionCalls;
-
-                if (calls) {
-                  const resps =[];
-
-                  for (const c of calls) {
-                    if (LIVE_RUNTIME.generation !== sessionGeneration) return;
-
-                    const toolName = c.name || 'unknown_tool';
-                    const args = c.args as any;
-                    const tid = Math.random().toString(36).substring(7);
-                    const action = safeJsonStringify(args || {});
-
-                    setTasks(p =>[...p, {
-                      id: tid,
-                      serviceName: toolName,
-                      action,
-                      status: 'processing',
-                    }]);
-
-                    try {
-                      const result = await executeGoogleTool(toolName, args);
-
-                      const download = result.downloadData && result.downloadFilename
-                        ? {
-                            downloadData: result.downloadData,
-                            downloadFilename: result.downloadFilename,
-                            htmlPreviewData: result.htmlPreviewData,
-                            htmlPreviewFilename: result.htmlPreviewFilename,
-                          }
-                        : makeDownloadFile(result, toolName);
-
-                      setTasks(p => p.map(t => t.id === tid ? {
-                        ...t,
-                        status: 'completed',
-                        result: result.note || `Completed: ${toolName}`,
-                        ...download,
-                      } : t));
-
-                      saveMessage(
-                        'model',
-                        result.note || `Tool result from ${toolName}: completed.`,
-                        {
-                          toolName,
-                          toolResult: result,
-                          ...download,
-                        }
-                      );
-
-                      setTimeout(() => setTasks(p => p.filter(t => t.id !== tid)), 16000);
-
-                      resps.push({
-                        id: c.id,
-                        name: toolName,
-                        response: {
-                          result,
-                          downloadFilename: download.downloadFilename,
-                        },
-                      });
-                    } catch (err: any) {
-                      const result = {
-                        toolName,
-                        args,
-                        status: 'failed',
-                        error: String(err?.message || err),
-                        executedAt: new Date().toISOString(),
-                      };
-
-                      const download = makeDownloadFile(result, `${toolName}-error`);
-
-                      setTasks(p => p.map(t => t.id === tid ? {
-                        ...t,
-                        status: 'failed',
-                        result: result.error,
-                        ...download,
-                      } : t));
-
-                      saveMessage(
-                        'model',
-                        `Tool failed from ${toolName}: ${result.error}`,
-                        {
-                          toolName,
-                          toolResult: result,
-                          ...download,
-                        }
-                      );
-
-                      resps.push({
-                        id: c.id,
-                        name: toolName,
-                        response: result,
-                      });
-                    }
-                  }
-
-                  if (
-                    resps.length > 0 &&
-                    LIVE_RUNTIME.generation === sessionGeneration &&
-                    sessionRef.current &&
-                    typeof sessionRef.current.sendToolResponse === 'function'
-                  ) {
-                    sessionRef.current.sendToolResponse({ functionResponses: resps });
-                  }
-                }
-              }
-
-              if (msg.serverContent) {
-                const serverContent: any = msg.serverContent;
-
-                if (serverContent.interrupted) {
-                  audioStreamerRef.current?.stop();
-                  setIsAgentSpeaking(false);
-                  
-                  saveModelBuffer();
-                  return;
-                }
-
-                if (serverContent.inputTranscription?.text) {
-                  const inputText = serverContent.inputTranscription.text;
-                  userTranscriptBufferRef.current = inputText.trim();
-                  setLiveUserText(userTranscriptBufferRef.current);
-                  updateLiveTranscript('user', userTranscriptBufferRef.current, 3200);
-                }
-
-                if (serverContent.outputTranscription?.text) {
-                  const outputText = serverContent.outputTranscription.text;
-                  modelTranscriptBufferRef.current = (modelTranscriptBufferRef.current + outputText).trim();
-                  setLiveModelText(modelTranscriptBufferRef.current);
-                  updateLiveTranscript('model', modelTranscriptBufferRef.current, 3900);
-                }
-
-                const parts = serverContent.modelTurn?.parts;
-
-                if (parts) {
-                  for (const part of parts) {
-                    if (LIVE_RUNTIME.generation !== sessionGeneration) return;
-
-                    if (part.inlineData?.data) {
-                      audioStreamerRef.current?.addPCM16(part.inlineData.data);
-                      setIsAgentSpeaking(true);
-
-                      setTimeout(() => {
-                        if (LIVE_RUNTIME.generation === sessionGeneration) {
-                          setIsAgentSpeaking(false);
-                        }
-                      }, 620);
-                    }
-
-                    if (part.text?.trim()) {
-                      modelTranscriptBufferRef.current = (modelTranscriptBufferRef.current + ' ' + part.text).trim();
-                      setLiveModelText(modelTranscriptBufferRef.current);
-                      updateLiveTranscript('model', modelTranscriptBufferRef.current, 3900);
-                    }
-                  }
-                }
-
-                if (serverContent.turnComplete) {
-                  saveModelBuffer();
-                  saveUserBuffer();
-                }
-              }
-            },
-
-            onclose: () => {
-              if (LIVE_RUNTIME.generation !== sessionGeneration) return;
-
-              LIVE_RUNTIME.session = null;
-              LIVE_RUNTIME.audioRecorder = null;
-              LIVE_RUNTIME.isClosing = false;
-              sessionRef.current = null;
-              audioRecorderRef.current = null;
-
-              stopMicVisualizer();
-              stopVideoStream(false);
-
-              isActiveRef.current = false;
-              setIsActive(false);
-              setConnecting(false);
-              setIsAgentSpeaking(false);
-              
-              setLiveUserText('');
-              setLiveModelText('');
-              setCurrentTranscript(null);
-            },
-
-            onerror: (err: any) => {
-              if (LIVE_RUNTIME.generation !== sessionGeneration) return;
-
-              console.error('Live API Error:', err);
-              stopSession();
-            },
-          },
-        });
-
-        if (LIVE_RUNTIME.generation !== sessionGeneration) {
-          try { session?.close(); } catch (e) {}
-          return false;
-        }
-
-        LIVE_RUNTIME.session = session;
-        LIVE_RUNTIME.ownerId = ownerIdRef.current;
-        LIVE_RUNTIME.isClosing = false;
-        sessionRef.current = session;
-
-        const recorder = new AudioRecorder((base64) => {
-          if (LIVE_RUNTIME.generation !== sessionGeneration) return;
-          if (isMutedRef.current) return;
-
-          sendAudioToLive(base64);
-        });
-
-        LIVE_RUNTIME.audioRecorder = recorder;
-        audioRecorderRef.current = recorder;
-
-        await recorder.start();
-
-        if (LIVE_RUNTIME.generation !== sessionGeneration) {
-          try { recorder.stop(); } catch (e) {}
-          try { session?.close(); } catch (e) {}
-          return false;
-        }
-
-        setIsActive(true);
-        isActiveRef.current = true;
-        setConnecting(false);
-        startMicVisualizer();
-
-        if (sendGreeting) {
-          setTimeout(() => {
-            if (LIVE_RUNTIME.generation !== sessionGeneration) return;
-
-            sendTextToLive(
-              `${settings.userName} is here in the office. Start like ${settings.agentName} is already sitting at the desk nearby as the office employee. If previous conversation context is available, you may briefly mention one relevant thing remembered from it. Begin in English, normally and respectfully, like: "Yes, boss. I'm listening." or "Yes, I'm here, Meneer Jo. I'm listening." Do not ask how you can help.`
-            );
-          }, 500);
-        }
-
-        return true;
-      } catch (err) {
-        console.error('Session start failed:', err);
-
-        if (LIVE_RUNTIME.generation === sessionGeneration) {
-          stopSession();
-        }
-
-        return false;
-      }
-    })();
-
-    LIVE_RUNTIME.startPromise = startPromise;
-    startPromiseRef.current = startPromise;
-
-    try {
-      return await startPromise;
-    } finally {
-      if (LIVE_RUNTIME.startPromise === startPromise) LIVE_RUNTIME.startPromise = null;
-      if (startPromiseRef.current === startPromise) startPromiseRef.current = null;
-    }
-  };
-
-  const toggleVideo = async () => {
-    if (videoStartingRef.current) return;
-
-    if (videoEnabledRef.current || isVideoEnabled) {
-      stopVideoStream(true);
+  // ---------- Session control (single audio, no overlap) ----------
+  const startSession = async () => {
+    if (connecting || isActiveRef.current) return;
+    stopSession(); // ensure clean state
+
+    if (!aiRef.current) {
+      alert('Gemini API key is missing. Make sure VITE_GEMINI_API_KEY is added in Vercel, then redeploy.');
       return;
     }
 
-    videoStartingRef.current = true;
+    setConnecting(true);
+    modelTranscriptBufferRef.current = '';
+    userTranscriptBufferRef.current = '';
 
     try {
-      const liveReady = sessionRef.current && isActiveRef.current
-        ? true
-        : await startSession({ sendGreeting: false });
-
-      if (!liveReady) {
-        videoStartingRef.current = false;
-        return;
+      if (audioStreamerRef.current) {
+        await audioStreamerRef.current.init(24000);
       }
 
-      stopVideoStream(false);
+      const hasGoogleServiceAccess = Boolean(localStorage.getItem('googleAccessToken'));
+      const systemInstruction = [
+        BASE_LIVE_AGENT_PROMPT,
+        BIBLE_PERSONALITY || '',
+        historyContext,
+        `Product brand: VEP, which means Virtual Employee Persona. Default persona: Beatrice, Boss Jo Lernout's secretary.`,
+        `User preferred name: ${settings.userName}.`,
+        `Agent visible name: ${settings.agentName}.`,
+        hasGoogleServiceAccess
+          ? `Authentication mode: Google account connected. Google services such as Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, Contacts, Forms, YouTube, and Analytics may be available through tools when the user asks.`
+          : `Authentication mode: email-only or Google services not connected. The voice assistant, chat history, profile, camera, file notes, and local app features are available, but Gmail, Drive, Calendar, Docs, Sheets, Slides, Tasks, Contacts, Forms, YouTube, and Analytics are not available unless the user signs in with Google. If asked for those services, explain this normally and briefly.`,
+        `Relationship frame: ${settings.agentName} is working with ${settings.userName} as a private secretary and trusted office aide. If the user is Jo Lernout, ${settings.agentName} may respectfully call him "Meneer Jo" when it fits the moment. Start in English unless the user starts in another language. Dutch Flemish is available in a normal local office style, and the persona can switch to almost any language when needed.`,
+        `Agent personality overlay from settings page. This is customizable and must sit on top of the constant base prompt without replacing it: ${settings.personality}.`,
+        `Selected visible voice alias: ${selectedVoiceMeta.alias}. Internal voice id: ${selectedVoiceMeta.id}. Voice vibe: ${selectedVoiceMeta.vibe}. Do not mention the internal voice id unless asked by the developer.`,
+        `When asked to create, build, render, showcase, prototype, code, animate, make slides, make forms, make dashboards, make pages, make Three.js demos, or make printable documents, call render_web_artifact with a complete standalone HTML/CSS/JS file. Never just describe the code if the user wants it rendered or built.`,
+        `For HTML/CSS/JS artifacts, include all CSS in <style> and all JS in <script>. Make it directly openable. For slides, include navigation controls and keyboard support. For documents, include print CSS and a print button. For Three.js, load Three.js from a CDN and keep everything in one HTML file.`,
+      ].filter(Boolean).join('\n\n');
 
-      const activeVideoSessionGeneration = sessionGenerationRef.current;
+      const session = await aiRef.current.live.connect({
+        model: LIVE_MODEL,
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: settings.selectedVoice || 'Charon',
+              },
+            },
+          },
+          systemInstruction,
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
+          tools: [{
+            functionDeclarations: GOOGLE_SERVICE_TOOLS,
+          }],
+        },
+        callbacks: {
+          onopen: () => {
+            console.log('Live session opened.');
+          },
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false, // Prevents breaking AudioRecorder's echo cancellation
-        video: {
-          facingMode,
-          width: 1280,
-          height: 720,
+          onmessage: async (msg: LiveServerMessage) => {
+            if (msg.toolCall) {
+              const calls = msg.toolCall.functionCalls;
+
+              if (calls) {
+                const resps = [];
+
+                for (const c of calls) {
+                  const toolName = c.name || 'unknown_tool';
+                  const args = c.args as any;
+                  const tid = Math.random().toString(36).substring(7);
+                  const action = safeJsonStringify(args || {});
+
+                  setTasks(p => [...p, {
+                    id: tid,
+                    serviceName: toolName,
+                    action,
+                    status: 'processing',
+                  }]);
+
+                  try {
+                    const result = await executeGoogleTool(toolName, args);
+
+                    const download = result.downloadData && result.downloadFilename
+                      ? {
+                          downloadData: result.downloadData,
+                          downloadFilename: result.downloadFilename,
+                          htmlPreviewData: result.htmlPreviewData,
+                          htmlPreviewFilename: result.htmlPreviewFilename,
+                        }
+                      : makeDownloadFile(result, toolName);
+
+                    setTasks(p => p.map(t => t.id === tid ? {
+                      ...t,
+                      status: 'completed',
+                      result: result.note || `Completed: ${toolName}`,
+                      ...download,
+                    } : t));
+
+                    saveMessage(
+                      'model',
+                      result.note || `Tool result from ${toolName}: completed.`,
+                      {
+                        toolName,
+                        toolResult: result,
+                        ...download,
+                      }
+                    );
+
+                    setTimeout(() => setTasks(p => p.filter(t => t.id !== tid)), 16000);
+
+                    resps.push({
+                      id: c.id,
+                      name: toolName,
+                      response: {
+                        result,
+                        downloadFilename: download.downloadFilename,
+                      },
+                    });
+                  } catch (err: any) {
+                    const result = {
+                      toolName,
+                      args,
+                      status: 'failed',
+                      error: String(err?.message || err),
+                      executedAt: new Date().toISOString(),
+                    };
+                    const download = makeDownloadFile(result, `${toolName}-error`);
+
+                    setTasks(p => p.map(t => t.id === tid ? {
+                      ...t,
+                      status: 'failed',
+                      result: result.error,
+                      ...download,
+                    } : t));
+
+                    saveMessage(
+                      'model',
+                      `Tool failed from ${toolName}: ${result.error}`,
+                      {
+                        toolName,
+                        toolResult: result,
+                        ...download,
+                      }
+                    );
+
+                    resps.push({
+                      id: c.id,
+                      name: toolName,
+                      response: result,
+                    });
+                  }
+                }
+
+                if (resps.length > 0 && sessionRef.current && typeof sessionRef.current.sendToolResponse === 'function') {
+                  sessionRef.current.sendToolResponse({ functionResponses: resps });
+                }
+              }
+            }
+
+            if (msg.serverContent) {
+              const serverContent: any = msg.serverContent;
+
+              if (serverContent.interrupted) {
+                audioStreamerRef.current?.stop();
+                setIsAgentSpeaking(false);
+                modelTranscriptBufferRef.current = '';
+                return;
+              }
+
+              if (serverContent.inputTranscription?.text) {
+                const inputText = serverContent.inputTranscription.text;
+                userTranscriptBufferRef.current = inputText.trim();
+                updateLiveTranscript('user', userTranscriptBufferRef.current, 3200);
+              }
+
+              if (serverContent.outputTranscription?.text) {
+                const outputText = serverContent.outputTranscription.text;
+                modelTranscriptBufferRef.current = (modelTranscriptBufferRef.current + outputText).trim();
+                updateLiveTranscript('model', modelTranscriptBufferRef.current, 3900);
+              }
+
+              const parts = serverContent.modelTurn?.parts;
+
+              if (parts) {
+                for (const part of parts) {
+                  if (part.inlineData?.data) {
+                    audioStreamerRef.current?.addPCM16(part.inlineData.data);
+                    setIsAgentSpeaking(true);
+                    setTimeout(() => setIsAgentSpeaking(false), 620);
+                  }
+
+                  if (part.text?.trim()) {
+                    modelTranscriptBufferRef.current = (modelTranscriptBufferRef.current + ' ' + part.text).trim();
+                    updateLiveTranscript('model', modelTranscriptBufferRef.current, 3900);
+                  }
+                }
+              }
+
+              if (serverContent.turnComplete) {
+                saveModelBuffer();
+                saveUserBuffer();
+              }
+            }
+          },
+
+          onclose: () => stopSession(),
+
+          onerror: (err: any) => {
+            console.error('Live API Error:', err);
+            stopSession();
+          },
         },
       });
 
-      if (sessionGenerationRef.current !== activeVideoSessionGeneration) {
-        stream.getTracks().forEach(track => track.stop());
-        return;
-      }
+      sessionRef.current = session;
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      try {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-      videoEnabledRef.current = true;
-      setIsVideoEnabled(true);
+        if (SpeechRecognition && !recognitionRef.current) {
+          recognitionRef.current = new SpeechRecognition();
+          recognitionRef.current.continuous = true;
+          recognitionRef.current.interimResults = true;
+
+          recognitionRef.current.onresult = (event: any) => {
+            let interimText = '';
+            let finalText = '';
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+              if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
+              else interimText += event.results[i][0].transcript;
+            }
+
+            const visibleText = (finalText || interimText).trim();
+
+            if (visibleText) {
+              userTranscriptBufferRef.current = visibleText;
+              updateLiveTranscript('user', visibleText, 3200);
+            }
+
+            if (finalText.trim()) {
+              saveMessage('user', finalText.trim());
+              lastSavedUserTranscriptRef.current = finalText.trim();
+              userTranscriptBufferRef.current = '';
+            }
+          };
+
+          recognitionRef.current.onend = () => {
+            if (sessionRef.current && isActiveRef.current) {
+              try {
+                recognitionRef.current?.start();
+              } catch (e) {}
+            }
+          };
+
+          recognitionRef.current.start();
+        }
+      } catch (e) {}
+
+      audioRecorderRef.current = new AudioRecorder((base64) => {
+        if (isMutedRef.current) return;
+        sendAudioToLive(base64);
+      });
+
+      await audioRecorderRef.current.start();
+
+      setIsActive(true);
+      isActiveRef.current = true;
+      setConnecting(false);
+      startMicVisualizer();
 
       setTimeout(() => {
-        if (sessionGenerationRef.current !== activeVideoSessionGeneration) return;
-
         sendTextToLive(
-          `${settings.userName} just opened the camera. Notice it in a normal human way, like you looked up and saw the view. Do not say you can assist. Say something like: Oh, yeah, I see it now. Then briefly describe only what is actually visible. If the visual input is unclear, say that.`
+          `${settings.userName} is here in the office. Start like ${settings.agentName} is already sitting at the desk nearby as the office employee. If previous conversation context is available, you may briefly mention one relevant thing remembered from it. Begin in English, normally and respectfully, like: "Yes, boss. I'm listening." or "Yes, I'm here, Meneer Jo. I'm listening." Do not ask how you can help.`
         );
-      }, 300);
+      }, 500);
+    } catch (err) {
+      console.error('Session start failed:', err);
+      setConnecting(false);
+      stopSession();
+    }
+  };
 
-      if (videoIntervalRef.current) {
-        clearInterval(videoIntervalRef.current);
-        videoIntervalRef.current = null;
+  const stopSession = () => {
+    try { recognitionRef.current?.stop(); } catch (e) {}
+    try { audioRecorderRef.current?.stop(); } catch (e) {}
+    try { audioStreamerRef.current?.stop(); } catch (e) {}
+    try { sessionRef.current?.close(); } catch (e) {}
+
+    stopMicVisualizer();
+
+    if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
+
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach((t) => t.stop());
+      videoRef.current.srcObject = null;
+    }
+
+    sessionRef.current = null;
+    recognitionRef.current = null;
+    modelTranscriptBufferRef.current = '';
+    userTranscriptBufferRef.current = '';
+    isActiveRef.current = false;
+
+    setIsVideoEnabled(false);
+    setIsActive(false);
+    setConnecting(false);
+    setIsAgentSpeaking(false);
+    setCurrentTranscript(null);
+  };
+
+  // ---------- Camera / UI handlers ----------
+  const toggleVideo = async () => {
+    if (!isVideoEnabled) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode, width: 1280, height: 720 },
+        });
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+
+        setIsVideoEnabled(true);
+
+        setTimeout(() => {
+          sendTextToLive(
+            `${settings.userName} just opened the camera. Notice it in a normal human way, like you looked up and saw the view. Do not say you can assist. Say something like: Oh, yeah, I see it now. Then briefly describe only what is actually visible. If the visual input is unclear, say that.`
+          );
+        }, 300);
+
+        videoIntervalRef.current = setInterval(() => {
+          if (!videoRef.current || !canvasRef.current || !sessionRef.current) return;
+
+          const v = videoRef.current;
+          const c = canvasRef.current;
+          const ctx = c.getContext('2d');
+
+          if (ctx && v.videoWidth > 0) {
+            c.width = v.videoWidth;
+            c.height = v.videoHeight;
+            ctx.drawImage(v, 0, 0, c.width, c.height);
+
+            const base64Url = c.toDataURL('image/jpeg', 0.55);
+            const base64Data = base64Url.split(',')[1];
+
+            if (base64Data) {
+              sendVideoToLive(base64Data);
+            }
+          }
+        }, 900);
+
+        // Stop continuous sending after 5 seconds to avoid duplicate audio loops
+        setTimeout(() => {
+          if (videoIntervalRef.current) {
+            clearInterval(videoIntervalRef.current);
+            videoIntervalRef.current = null;
+          }
+        }, 5000);
+      } catch (e) {
+        console.error('Camera error:', e);
+      }
+    } else {
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach((t) => t.stop());
+        videoRef.current.srcObject = null;
       }
 
-      videoIntervalRef.current = setInterval(() => {
-        if (!videoEnabledRef.current) return;
-        if (sessionGenerationRef.current !== activeVideoSessionGeneration) return;
-        if (!videoRef.current || !canvasRef.current || !sessionRef.current) return;
+      if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
+      setIsVideoEnabled(false);
 
-        const v = videoRef.current;
-        const c = canvasRef.current;
-        const ctx = c.getContext('2d');
-
-        if (ctx && v.videoWidth > 0 && v.videoHeight > 0) {
-          c.width = v.videoWidth;
-          c.height = v.videoHeight;
-          ctx.drawImage(v, 0, 0, c.width, c.height);
-
-          const base64Url = c.toDataURL('image/jpeg', 0.55);
-          const base64Data = base64Url.split(',')[1];
-
-          if (base64Data) {
-            sendVideoToLive(base64Data);
-          }
-        }
-      }, 900);
-    } catch (e) {
-      console.error('Camera error:', e);
-      stopVideoStream(false);
-    } finally {
-      videoStartingRef.current = false;
+      setTimeout(() => {
+        sendTextToLive(`${settings.userName} closed the camera. Acknowledge it normally and keep the conversation going.`);
+      }, 150);
     }
   };
 
@@ -3279,167 +2992,89 @@ function BeatriceAgent({
   };
 
   const switchCamera = async () => {
-    if (!videoEnabledRef.current) return;
-
     const newMode = facingMode === 'user' ? 'environment' : 'user';
     setFacingMode(newMode);
 
-    if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: newMode,
-          width: 1280,
-          height: 720,
-        },
-      });
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+    if (isVideoEnabled) {
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach((t) => t.stop());
       }
 
-      sendTextToLive(`${settings.userName} switched the camera. Notice the new view normally and describe only what stands out.`);
-    } catch (e) {
-      console.error('Camera switch error:', e);
-      stopVideoStream(false);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: newMode, width: 1280, height: 720 },
+        });
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(e => console.error('Video play err', e));
+        }
+
+        sendTextToLive(`${settings.userName} switched the camera. Notice the new view normally and describe only what stands out.`);
+      } catch (e) {
+        console.error('Camera switch error:', e);
+      }
     }
   };
 
   const handleAttachFile = async (file: File) => {
     const safeName = file.name || 'attached file';
     const fileType = file.type || 'unknown';
-    const ext = safeName.split('.').pop()?.toLowerCase() || '';
-
-    const isImage = fileType.startsWith('image/');
-    const isAudio = fileType.startsWith('audio/');
-    const isVideo = fileType.startsWith('video/');
-    const isTextLike = fileType.startsWith('text/') ||['css','js','jsx','ts','tsx','json','md','csv','html','xml'].includes(ext);
-
-    let previewUrl = await generateFileThumbnail(file, fileType);
-    let previewText = '';
-    let fullText = '';
-
-    if (!isImage && !isVideo && !isAudio && (isTextLike || file.size < 500000)) {
-      try {
-        fullText = await file.text();
-        if (!/\x00/.test(fullText)) {
-          previewText = fullText.slice(0, 800) + (fullText.length > 800 ? '\n...[truncated]' : '');
-        } else {
-           fullText = ''; 
-        }
-      } catch (e) {}
-    }
-
-    saveMessage('user', `[Attached file: ${safeName}]`, {
-      fileName: safeName,
-      fileType,
-      previewUrl: previewUrl || undefined,
-      previewText: previewText || undefined,
-    });
-
-    updateLiveTranscript('user', `Attached file: ${safeName}`, 3000);
 
     if (!sessionRef.current) {
-      const msg = `${settings.agentName} is not connected yet. Start the live session first to process files.`;
-      updateLiveTranscript('model', msg, 3400);
-      saveMessage('model', msg);
+      saveMessage('user', `[Attached file: ${safeName}]`, { fileName: safeName, fileType });
+      updateLiveTranscript('user', `Attached file: ${safeName}`, 3000);
       return;
     }
 
     try {
-      if (isImage || isVideo) {
-         if (previewUrl) {
-            const base64Data = previewUrl.split(',')[1];
-            sendVideoToLive(base64Data);
-            sendTextToLive(`${settings.userName} uploaded a ${isImage ? 'image' : 'video'} named ${safeName}. Please look at the frame and respond.`);
-         }
-      } else if (isAudio) {
-          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-          const ctx = new AudioCtx({ sampleRate: 16000 });
-          const arrayBuffer = await file.arrayBuffer();
-          const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-          const channelData = audioBuffer.getChannelData(0); 
-          
-          const pcm16 = new Int16Array(channelData.length);
-          for (let i = 0; i < channelData.length; i++) {
-            let s = Math.max(-1, Math.min(1, channelData[i]));
-            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      // Images -> send as video frame
+      if (fileType.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const base64 = dataUrl.split(',')[1];
+          if (base64) {
+            sendVideoToLive(base64);
+            sendTextToLive(`${settings.userName} uploaded an image named "${safeName}". Look at it and describe or answer normally.`);
+            saveMessage('user', `[Sent image: ${safeName}]`, { fileName: safeName, fileType });
+            updateLiveTranscript('user', `Image: ${safeName}`, 3000);
           }
-          
-          const bytes = new Uint8Array(pcm16.buffer);
-          let binary = '';
-          const chunkSize = 0x8000;
-          for (let i = 0; i < bytes.length; i += chunkSize) {
-            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]);
-          }
-          const base64Data = btoa(binary);
-          sendAudioToLive(base64Data);
-          sendTextToLive(`${settings.userName} uploaded an audio file named ${safeName}. Please listen to it and respond.`);
-      } else if (fullText) {
-           sendTextToLive(`${settings.userName} uploaded a document/code file named ${safeName}. Content:\n\n${fullText}\n\nPlease read it and respond.`);
-      } else {
-           sendTextToLive(`${settings.userName} uploaded a file named "${safeName}" with type "${fileType}". You cannot read its binary contents directly, so acknowledge it normally.`);
+        };
+        reader.readAsDataURL(file);
+        return;
       }
+
+      // Text-based files -> include content
+      const textMimes = ['text/', 'application/json', 'application/xml', 'application/javascript', 'application/x-yaml',
+                         'application/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+      if (textMimes.some(m => fileType.includes(m))) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const content = (reader.result as string).substring(0, 4000); // limit size
+          sendTextToLive(
+            `${settings.userName} uploaded the file "${safeName}" with content:\n---\n${content}\n---\nRead it and respond.`
+          );
+          saveMessage('user', `[Attached file: ${safeName}]\n${content}`, { fileName: safeName, fileType });
+          updateLiveTranscript('user', `File: ${safeName}`, 3000);
+        };
+        reader.readAsText(file);
+        return;
+      }
+
+      // Other files – mention only
+      sendTextToLive(
+        `${settings.userName} attached a file named "${safeName}" (${fileType}). I cannot read its contents directly, but I'm aware of it.`
+      );
+      saveMessage('user', `[Attached file: ${safeName}]`, { fileName: safeName, fileType });
+      updateLiveTranscript('user', `Attached: ${safeName}`, 3000);
     } catch (e) {
-      console.error("File processing error", e);
-      sendTextToLive(`${settings.userName} tried to upload ${safeName}, but there was an error processing it locally.`);
+      console.error('File attach error:', e);
+      sendTextToLive(`${settings.userName} attached "${safeName}" but I couldn't process it.`);
+      saveMessage('user', `[Attached file: ${safeName}]`, { fileName: safeName, fileType });
+      updateLiveTranscript('user', `Attached: ${safeName}`, 3000);
     }
-  };
-
-  const stopSession = () => {
-    if (LIVE_RUNTIME.ownerId && LIVE_RUNTIME.ownerId !== ownerIdRef.current && LIVE_RUNTIME.session) {
-      sessionRef.current = null;
-      audioRecorderRef.current = null;
-      return;
-    }
-
-    LIVE_RUNTIME.isClosing = true;
-    LIVE_RUNTIME.generation += 1;
-    sessionGenerationRef.current = LIVE_RUNTIME.generation;
-
-    isActiveRef.current = false;
-
-    const recorder = audioRecorderRef.current || LIVE_RUNTIME.audioRecorder;
-    const streamer = audioStreamerRef.current || LIVE_RUNTIME.audioStreamer;
-    const session = sessionRef.current || LIVE_RUNTIME.session;
-
-    try { recorder?.stop(); } catch (e) {}
-    try { streamer?.stop(); } catch (e) {}
-    try { session?.close(); } catch (e) {}
-
-    LIVE_RUNTIME.audioRecorder = null;
-    LIVE_RUNTIME.session = null;
-    LIVE_RUNTIME.ownerId = '';
-    LIVE_RUNTIME.isClosing = false;
-
-    audioRecorderRef.current = null;
-    sessionRef.current = null;
-
-    stopMicVisualizer();
-    stopVideoStream(false);
-
-    modelTranscriptBufferRef.current = '';
-    userTranscriptBufferRef.current = '';
-
-    if (transcriptTimeoutRef.current) {
-      clearTimeout(transcriptTimeoutRef.current);
-      transcriptTimeoutRef.current = null;
-    }
-
-    setIsActive(false);
-    setConnecting(false);
-    setIsAgentSpeaking(false);
-    
-    setLiveUserText('');
-    setLiveModelText('');
-    setCurrentTranscript(null);
   };
 
   const persistSettings = async () => {
@@ -3454,6 +3089,7 @@ function BeatriceAgent({
     setShowProfile(false);
   };
 
+  // ---------- Render ----------
   return (
     <div
       className="relative flex h-[100dvh] min-h-screen flex-col overflow-hidden bg-[#020203] text-zinc-300 selection:bg-lime-300/30"
@@ -3472,6 +3108,7 @@ function BeatriceAgent({
         }}
       />
 
+      {/* Video overlay */}
       <AnimatePresence>
         {isVideoEnabled && (
           <motion.div
@@ -3515,6 +3152,7 @@ function BeatriceAgent({
               </button>
             </div>
 
+            {/* One‑line transcript overlay on video */}
             <AnimatePresence>
               {currentTranscript && (
                 <motion.div
@@ -3535,6 +3173,7 @@ function BeatriceAgent({
         )}
       </AnimatePresence>
 
+      {/* Header (hidden when video is on) */}
       <header className={`z-50 flex items-center justify-between border-b border-white/5 bg-[#050505]/80 px-8 py-6 backdrop-blur-md ${isVideoEnabled ? 'pointer-events-none opacity-0' : ''}`}>
         <div className="flex items-center gap-4">
           <button onClick={() => setShowSidebar(true)} className="-ml-2 rounded-xl border border-white/10 p-2 text-zinc-400 transition-all hover:bg-white/5 hover:text-white">
@@ -3577,6 +3216,7 @@ function BeatriceAgent({
         </div>
       </header>
 
+      {/* Main orb + controls (hidden when video is on) */}
       {!isVideoEnabled && (
         <main className="pointer-events-none relative z-10 flex w-full flex-1 flex-col items-center justify-start p-8 pt-12">
           <div className="pointer-events-none absolute inset-0 z-[-1] -translate-y-20 overflow-hidden">
@@ -3593,13 +3233,14 @@ function BeatriceAgent({
             speakerBands={speakerBands}
           />
 
+          {/* One‑line transcript on the main screen */}
           <AnimatePresence>
             {currentTranscript && (
               <motion.div
                 initial={{ opacity: 0, y: 14 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -12 }}
-                className="absolute left-1/2 top-[340px] z-50 w-[92vw] max-w-5xl -translate-x-1/2"
+                className="pointer-events-none absolute left-1/2 top-[340px] z-50 w-[92vw] max-w-5xl -translate-x-1/2"
               >
                 <OneLineStreamingTranscript
                   role={currentTranscript.role}
@@ -3612,6 +3253,7 @@ function BeatriceAgent({
 
           <div className="pointer-events-none absolute inset-x-0 bottom-8 z-50 flex flex-col items-center justify-end">
             <div className="mb-4 w-full max-w-md space-y-2 px-6">
+              {/* Task bubbles */}
               <AnimatePresence>
                 {tasks.map(task => (
                   <motion.div
@@ -3694,7 +3336,7 @@ function BeatriceAgent({
                     isMuted={isMuted}
                     micLevel={0}
                     micBands={micBands}
-                    onClick={() => startSession()}
+                    onClick={startSession}
                   />
                 ) : (
                   <StartIconMicVisualizer
@@ -3721,6 +3363,7 @@ function BeatriceAgent({
         </main>
       )}
 
+      {/* Sidebar with chat history AND live transcription bubble */}
       <AnimatePresence>
         {showSidebar && (
           <>
@@ -3762,7 +3405,7 @@ function BeatriceAgent({
               </div>
 
               <div className="flex min-h-0 flex-1 flex-col">
-                <div className="flex-1 space-y-3 overflow-y-auto p-4 pb-3 scroll-smooth">
+                <div className="flex-1 space-y-3 overflow-y-auto p-4 pb-3">
                   {historyMsgs.map((msg, i) => (
                     <div key={`${msg.timestamp}-${i}`} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                       <span className="mb-1 text-[8px] uppercase tracking-widest text-zinc-600">
@@ -3778,18 +3421,6 @@ function BeatriceAgent({
                           <div className="mb-2 flex items-center gap-2 rounded-xl bg-black/30 px-2 py-1 text-[10px] text-lime-200">
                             <Upload className="h-3 w-3" />
                             {msg.fileName}
-                          </div>
-                        )}
-
-                        {/* RENDER THE UPLOADED FILE PREVIEWS INSIDE THE MESSAGE BUBBLE */}
-                        {msg.previewUrl && (
-                          <div className="mb-2 overflow-hidden rounded-lg border border-white/10 bg-black/50 shadow-md">
-                            <img src={msg.previewUrl} alt="Thumbnail preview" className="max-h-48 w-full object-contain" />
-                          </div>
-                        )}
-                        {msg.previewText && (
-                          <div className="mb-2 max-h-32 overflow-y-auto rounded border border-white/5 bg-black/40 p-2 font-mono text-[9px] text-zinc-300 shadow-inner">
-                            <pre className="whitespace-pre-wrap break-words">{msg.previewText}</pre>
                           </div>
                         )}
 
@@ -3839,6 +3470,7 @@ function BeatriceAgent({
                     </div>
                   ))}
 
+                  {/* Live transcription bubble in the chat list */}
                   <AnimatePresence>
                     {currentTranscript && (
                       <motion.div
@@ -3907,6 +3539,7 @@ function BeatriceAgent({
         )}
       </AnimatePresence>
 
+      {/* Profile panel */}
       <AnimatePresence>
         {showProfile && (
           <motion.div
