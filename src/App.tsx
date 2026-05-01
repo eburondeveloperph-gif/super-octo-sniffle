@@ -56,6 +56,8 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
+type PreviewKind = 'image' | 'video' | 'audio' | 'pdf' | 'html' | 'text' | 'json' | 'csv' | 'code' | 'file';
+
 interface ChatMessage {
   role: 'user' | 'model';
   text: string;
@@ -68,6 +70,13 @@ interface ChatMessage {
   downloadFilename?: string;
   htmlPreviewData?: string;
   htmlPreviewFilename?: string;
+  previewKind?: PreviewKind;
+  previewData?: string;
+  previewMimeType?: string;
+  previewTitle?: string;
+  previewFilename?: string;
+  sourceUrl?: string;
+  groundingMetadata?: any;
 }
 
 interface ActionTask {
@@ -80,6 +89,11 @@ interface ActionTask {
   downloadFilename?: string;
   htmlPreviewData?: string;
   htmlPreviewFilename?: string;
+  previewKind?: PreviewKind;
+  previewData?: string;
+  previewMimeType?: string;
+  previewTitle?: string;
+  previewFilename?: string;
 }
 
 interface AgentSettings {
@@ -91,6 +105,9 @@ interface AgentSettings {
 }
 
 const LIVE_MODEL = 'gemini-3.1-flash-live-preview';
+const GEMINI_CONTENT_MODEL = import.meta.env.VITE_GEMINI_CONTENT_MODEL || 'gemini-3.1-flash';
+const ERNIE_IMAGE_API_BASE = import.meta.env.VITE_ERNIE_IMAGE_API_BASE || 'http://localhost:7860';
+const MAX_INLINE_FILE_BYTES = 18 * 1024 * 1024;
 const EBURON_LOGO_URL = 'https://eburon.ai/icon-eburon.svg';
 const PRODUCT_BRAND = 'VEP';
 const PRODUCT_FULL_NAME = 'Virtual Employee Persona';
@@ -558,7 +575,61 @@ const GOOGLE_SERVICE_TOOLS = [
       required: ['title', 'contractType', 'partyA', 'partyB', 'terms'],
     },
   },
-];
+,
+  {
+    name: 'analyze_uploaded_file',
+    description:
+      'Analyze a file that the user attached in the current chat. Supports images, screenshots, PDFs, audio, video, text, CSV, JSON, HTML, and code files when the content is available in the browser.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        fileId: { type: Type.STRING, description: 'Attachment id shown to the model when the user attached the file. Use latest when unsure.' },
+        instruction: { type: Type.STRING, description: 'What to inspect, summarize, transcribe, read, extract, or explain from the file.' },
+      },
+      required: ['instruction'],
+    },
+  },
+  {
+    name: 'fetch_url_context',
+    description:
+      'Fetch and understand a public URL using Gemini URL context. Use when the user pastes a link and asks to read, inspect, summarize, explain, or extract from it.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        url: { type: Type.STRING, description: 'The public URL to fetch.' },
+        instruction: { type: Type.STRING, description: 'What to do with the URL content.' },
+        useGoogleSearch: { type: Type.BOOLEAN, description: 'Also use Google Search grounding for context when useful.' },
+      },
+      required: ['url', 'instruction'],
+    },
+  },
+  {
+    name: 'google_search_grounding',
+    description:
+      'Use Google Search grounding for current public information, recent events, websites, products, docs, references, or anything that may have changed.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        query: { type: Type.STRING, description: 'The search or research question.' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'generate_image_with_beatrice',
+    description:
+      'Generate an image from the conversation using the configured baidu/ERNIE-Image-Turbo Gradio endpoint. Render the generated image in chat with a download option.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        prompt: { type: Type.STRING, description: 'The final image prompt generated from the conversation.' },
+        image_size: { type: Type.STRING, description: 'Image size such as 1024x1024.' },
+        seed: { type: Type.NUMBER, description: 'Random seed. Use -1 for random.' },
+        use_pe: { type: Type.BOOLEAN, description: 'Whether to use prompt enhancement.' },
+      },
+      required: ['prompt'],
+    },
+  }];
 
 function safeJsonStringify(value: any) {
   try {
@@ -641,6 +712,211 @@ function makeHtmlArtifactFile(html: string, filenameBase: string) {
     downloadFilename: `${safe}.html`,
   };
 }
+
+function makeTextDataUrl(text: string, mime = 'text/plain') {
+  return `data:${mime};charset=utf-8,${encodeURIComponent(text || '')}`;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Could not read file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function dataUrlToBase64(dataUrl: string) {
+  const comma = dataUrl.indexOf(',');
+  return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+}
+
+function getPreviewKindFromMime(mimeType: string, fileName = ''): PreviewKind {
+  const mime = String(mimeType || '').toLowerCase();
+  const name = String(fileName || '').toLowerCase();
+
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
+  if (mime.includes('html') || name.endsWith('.html') || name.endsWith('.htm')) return 'html';
+  if (mime.includes('json') || name.endsWith('.json')) return 'json';
+  if (mime.includes('csv') || name.endsWith('.csv')) return 'csv';
+  if (
+    mime.startsWith('text/') ||
+    name.endsWith('.ts') ||
+    name.endsWith('.tsx') ||
+    name.endsWith('.js') ||
+    name.endsWith('.jsx') ||
+    name.endsWith('.css') ||
+    name.endsWith('.py') ||
+    name.endsWith('.md') ||
+    name.endsWith('.txt')
+  ) {
+    return 'text';
+  }
+
+  return 'file';
+}
+
+function extractFirstUrl(text: string) {
+  return String(text || '').match(/https?:\/\/[^\s)]+/i)?.[0] || '';
+}
+
+function stripMarkdownFence(value: string) {
+  const trimmed = String(value || '').trim();
+  const fenced = trimmed.match(/^```(?:html)?\s*([\s\S]*?)\s*```$/i);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
+function parseGradioEventId(raw: string) {
+  const text = String(raw || '').trim();
+
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed === 'string') return parsed;
+    if (parsed.event_id) return parsed.event_id;
+  } catch {}
+
+  return (
+    text.match(/"event_id"\s*:\s*"([^"]+)"/)?.[1] ||
+    text.match(/event_id['"]?\s*[:=]\s*['"]([^'"]+)['"]/)?.[1] ||
+    text.match(/"([^"]{8,})"/)?.[1] ||
+    ''
+  );
+}
+
+function parseGradioStream(raw: string) {
+  const lines = String(raw || '')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  const dataLines = lines
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.replace(/^data:\s*/, '').trim())
+    .filter(line => line && line !== '[DONE]');
+
+  const candidates = dataLines.length ? dataLines.reverse() : [String(raw || '').trim()];
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {}
+  }
+
+  return null;
+}
+
+function normalizeGeneratedImageUrl(imageOutput: any) {
+  if (!imageOutput) return '';
+
+  if (typeof imageOutput === 'string') {
+    if (imageOutput.startsWith('http') || imageOutput.startsWith('data:')) return imageOutput;
+    if (imageOutput.startsWith('/')) return `${ERNIE_IMAGE_API_BASE}${imageOutput}`;
+    return `${ERNIE_IMAGE_API_BASE}/file=${encodeURIComponent(imageOutput)}`;
+  }
+
+  if (imageOutput.url) return imageOutput.url;
+  if (imageOutput.path) {
+    const path = String(imageOutput.path);
+    if (path.startsWith('http')) return path;
+    if (path.startsWith('/')) return `${ERNIE_IMAGE_API_BASE}${path}`;
+    return `${ERNIE_IMAGE_API_BASE}/file=${encodeURIComponent(path)}`;
+  }
+
+  return '';
+}
+
+function buildPreviewDownloadFromResult(result: any, fallbackName: string) {
+  const fallback = makeDownloadFile(result, fallbackName);
+
+  return {
+    downloadData: result.downloadData || fallback.downloadData,
+    downloadFilename: result.downloadFilename || fallback.downloadFilename,
+    htmlPreviewData: result.htmlPreviewData,
+    htmlPreviewFilename: result.htmlPreviewFilename,
+    previewKind: result.previewKind,
+    previewData: result.previewData,
+    previewMimeType: result.previewMimeType,
+    previewTitle: result.previewTitle,
+    previewFilename: result.previewFilename,
+    sourceUrl: result.sourceUrl,
+    groundingMetadata: result.groundingMetadata,
+  };
+}
+
+function ChatPreviewBlock({ msg }: { msg: ChatMessage }) {
+  const previewData = msg.previewData || msg.htmlPreviewData || msg.downloadData;
+  const previewKind = msg.previewKind || (msg.htmlPreviewData ? 'html' : undefined);
+  const title = msg.previewTitle || msg.previewFilename || msg.htmlPreviewFilename || msg.downloadFilename || msg.fileName || 'Preview';
+
+  if (!previewKind || !previewData) return null;
+
+  if (previewKind === 'image') {
+    return (
+      <div className="mt-3 overflow-hidden rounded-xl border border-lime-300/15 bg-black/30">
+        <img src={previewData} alt={title} className="max-h-80 w-full object-contain" />
+      </div>
+    );
+  }
+
+  if (previewKind === 'video') {
+    return (
+      <video
+        src={previewData}
+        controls
+        className="mt-3 max-h-80 w-full rounded-xl border border-lime-300/15 bg-black"
+      />
+    );
+  }
+
+  if (previewKind === 'audio') {
+    return (
+      <audio
+        src={previewData}
+        controls
+        className="mt-3 w-full"
+      />
+    );
+  }
+
+  if (previewKind === 'pdf' || previewKind === 'html') {
+    return (
+      <iframe
+        title={title}
+        src={previewData}
+        sandbox={previewKind === 'html' ? 'allow-scripts allow-forms allow-popups allow-modals' : undefined}
+        className="mt-3 h-80 w-full rounded-xl border border-lime-300/15 bg-white"
+      />
+    );
+  }
+
+  if (previewKind === 'text' || previewKind === 'json' || previewKind === 'csv' || previewKind === 'code') {
+    let text = '';
+
+    try {
+      const encoded = String(previewData).split(',')[1] || '';
+      text = decodeURIComponent(encoded);
+    } catch {
+      text = msg.text || '';
+    }
+
+    return (
+      <pre className="mt-3 max-h-80 overflow-auto rounded-xl border border-white/10 bg-black/35 p-3 text-[10px] leading-relaxed text-zinc-200">
+        {text}
+      </pre>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-xl border border-white/10 bg-black/30 p-3 text-[10px] text-zinc-400">
+      Preview is not available for this file type, but the file can be downloaded.
+    </div>
+  );
+}
+
 
 function makeBlobDownloadData(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -1578,6 +1854,17 @@ function BeatriceAgent({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoIntervalRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const attachedFilesRef = useRef<Record<string, {
+    id: string;
+    name: string;
+    mimeType: string;
+    size: number;
+    dataUrl: string;
+    base64: string;
+    previewKind: PreviewKind;
+    textPreview?: string;
+  }>>({});
+  const lastAttachedFileIdRef = useRef<string | null>(null);
 
   const modelTranscriptBufferRef = useRef('');
   const userTranscriptBufferRef = useRef('');
@@ -2561,6 +2848,254 @@ function BeatriceAgent({
         };
       }
 
+
+      case 'analyze_uploaded_file': {
+        if (!aiRef.current) throw new Error('Gemini API key is missing.');
+
+        const fileId = args.fileId || lastAttachedFileIdRef.current;
+        const instruction = args.instruction || 'Inspect this file and summarize what is important.';
+
+        if (!fileId) throw new Error('No attached file id was provided.');
+        const file = attachedFilesRef.current[fileId];
+
+        if (!file) {
+          throw new Error('The attached file is no longer available in this browser session.');
+        }
+
+        if (file.size > MAX_INLINE_FILE_BYTES) {
+          throw new Error(`File is too large for inline analysis in the browser. Size: ${file.size} bytes.`);
+        }
+
+        const response = await aiRef.current.models.generateContent({
+          model: GEMINI_CONTENT_MODEL,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: `You are Beatrice's file-analysis tool.
+
+File metadata:
+- id: ${file.id}
+- name: ${file.name}
+- mimeType: ${file.mimeType}
+- size: ${file.size} bytes
+
+User instruction:
+${instruction}
+
+Analyze only what is actually available in the file. If text is visible in an image, extract it if possible. If this is audio, transcribe or summarize it when possible. If this is video, summarize the visible and audible content when possible. Be honest about uncertainty.`,
+                },
+                {
+                  inlineData: {
+                    mimeType: file.mimeType || 'application/octet-stream',
+                    data: file.base64,
+                  },
+                },
+              ],
+            },
+          ],
+        });
+
+        const answer = response.text || 'I checked the file, but I could not extract a clear result.';
+
+        return {
+          toolName,
+          executedAt,
+          status: 'completed',
+          note: `I checked ${file.name}.`,
+          answer,
+          file: {
+            id: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            size: file.size,
+          },
+          previewKind: file.previewKind,
+          previewData: file.dataUrl,
+          previewMimeType: file.mimeType,
+          previewTitle: file.name,
+          previewFilename: file.name,
+          downloadData: file.dataUrl,
+          downloadFilename: file.name,
+          textPreview: answer,
+        };
+      }
+
+      case 'fetch_url_context': {
+        if (!aiRef.current) throw new Error('Gemini API key is missing.');
+
+        const url = args.url || extractFirstUrl(args.instruction || '');
+        if (!url) throw new Error('No URL was provided.');
+
+        const instruction = args.instruction || 'Read this URL and summarize the important information.';
+        const tools: any[] = [{ urlContext: {} }];
+
+        if (args.useGoogleSearch !== false) {
+          tools.push({ googleSearch: {} });
+        }
+
+        const response = await aiRef.current.models.generateContent({
+          model: GEMINI_CONTENT_MODEL,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: `Use URL context to inspect this page.
+
+URL:
+${url}
+
+Instruction:
+${instruction}
+
+If the page is private, blocked, unsafe, unreachable, or requires login, say so clearly.`,
+                },
+              ],
+            },
+          ],
+          config: { tools },
+        });
+
+        const answer = response.text || 'I checked the URL, but I could not extract a clear result.';
+        const data = makeTextDataUrl(answer, 'text/markdown');
+
+        return {
+          toolName,
+          executedAt,
+          status: 'completed',
+          note: 'I checked the page.',
+          sourceUrl: url,
+          answer,
+          urlContextMetadata: (response as any).candidates?.[0]?.urlContextMetadata || null,
+          groundingMetadata: (response as any).candidates?.[0]?.groundingMetadata || null,
+          previewKind: 'text',
+          previewData: data,
+          previewMimeType: 'text/markdown',
+          previewTitle: 'URL result',
+          previewFilename: 'url-result.md',
+          downloadData: data,
+          downloadFilename: 'url-result.md',
+        };
+      }
+
+      case 'google_search_grounding': {
+        if (!aiRef.current) throw new Error('Gemini API key is missing.');
+
+        const query = args.query || '';
+        if (!query.trim()) throw new Error('No search query was provided.');
+
+        const response = await aiRef.current.models.generateContent({
+          model: GEMINI_CONTENT_MODEL,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: `Use Google Search grounding to answer this with current public information.
+
+Query:
+${query}
+
+Keep the answer clear, practical, and honest. Include source context when available.`,
+                },
+              ],
+            },
+          ],
+          config: {
+            tools: [{ googleSearch: {} }],
+          },
+        });
+
+        const answer = response.text || 'I searched, but I could not extract a clear result.';
+        const data = makeTextDataUrl(answer, 'text/markdown');
+
+        return {
+          toolName,
+          executedAt,
+          status: 'completed',
+          note: 'I checked Google Search.',
+          query,
+          answer,
+          groundingMetadata: (response as any).candidates?.[0]?.groundingMetadata || null,
+          previewKind: 'text',
+          previewData: data,
+          previewMimeType: 'text/markdown',
+          previewTitle: 'Google Search result',
+          previewFilename: 'google-search-result.md',
+          downloadData: data,
+          downloadFilename: 'google-search-result.md',
+        };
+      }
+
+      case 'generate_image_with_beatrice': {
+        const prompt = String(args.prompt || '').trim();
+        if (!prompt) throw new Error('No image prompt was provided.');
+
+        const imageSize = args.image_size || '1024x1024';
+        const seed = typeof args.seed === 'number' ? args.seed : -1;
+        const usePe = typeof args.use_pe === 'boolean' ? args.use_pe : true;
+
+        const startRes = await fetch(`${ERNIE_IMAGE_API_BASE}/gradio_api/call/generate_image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            data: [prompt, imageSize, seed, usePe],
+          }),
+        });
+
+        if (!startRes.ok) {
+          throw new Error(`Image generation start failed: ${startRes.status} ${startRes.statusText}`);
+        }
+
+        const startText = await startRes.text();
+        const eventId = parseGradioEventId(startText);
+
+        if (!eventId) {
+          throw new Error(`Image generator did not return an event id. Raw response: ${startText}`);
+        }
+
+        const resultRes = await fetch(`${ERNIE_IMAGE_API_BASE}/gradio_api/call/generate_image/${encodeURIComponent(eventId)}`, {
+          method: 'GET',
+        });
+
+        if (!resultRes.ok) {
+          throw new Error(`Image generation result failed: ${resultRes.status} ${resultRes.statusText}`);
+        }
+
+        const raw = await resultRes.text();
+        const parsed = parseGradioStream(raw);
+        const output = Array.isArray(parsed) ? parsed : parsed?.data || parsed?.output || parsed?.result;
+        const imageOutput = output?.[0];
+        const revisedPrompt = output?.[1] || prompt;
+        const imageUrl = normalizeGeneratedImageUrl(imageOutput);
+
+        if (!imageUrl) {
+          throw new Error(`No generated image URL was returned. Raw result: ${raw}`);
+        }
+
+        return {
+          toolName,
+          executedAt,
+          status: 'completed',
+          note: 'I finished the image.',
+          prompt,
+          revisedPrompt,
+          imageSize,
+          seed,
+          usePe,
+          eventId,
+          previewKind: 'image',
+          previewData: imageUrl,
+          previewMimeType: 'image/png',
+          previewTitle: 'Generated image',
+          previewFilename: 'beatrice-generated-image.png',
+          downloadData: imageUrl,
+          downloadFilename: 'beatrice-generated-image.png',
+        };
+      }
+
       default:
         throw new Error(`Tool "${toolName}" is not implemented yet.`);
     }
@@ -2642,17 +3177,12 @@ function BeatriceAgent({
                     status: 'processing',
                   }]);
 
+                  updateLiveTranscript('model', "Yes, I'm working on that now.", 2500);
+
                   try {
                     const result = await executeGoogleTool(toolName, args);
 
-                    const download = result.downloadData && result.downloadFilename
-                      ? {
-                          downloadData: result.downloadData,
-                          downloadFilename: result.downloadFilename,
-                          htmlPreviewData: result.htmlPreviewData,
-                          htmlPreviewFilename: result.htmlPreviewFilename,
-                        }
-                      : makeDownloadFile(result, toolName);
+                    const download = buildPreviewDownloadFromResult(result, toolName);
 
                     setTasks(p => p.map(t => t.id === tid ? {
                       ...t,
@@ -2957,19 +3487,73 @@ function BeatriceAgent({
 
   const handleAttachFile = async (file: File) => {
     const safeName = file.name || 'attached file';
-    const fileType = file.type || 'unknown';
+    const fileType = file.type || 'application/octet-stream';
+    const fileId = `file_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
-    saveMessage('user', `[Attached file: ${safeName}]`, {
-      fileName: safeName,
-      fileType,
-    });
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const base64 = dataUrlToBase64(dataUrl);
+      const previewKind = getPreviewKindFromMime(fileType, safeName);
 
-    updateLiveTranscript('user', `Attached file: ${safeName}`, 3000);
+      let textPreview = '';
 
-    if (sessionRef.current) {
-      sendTextToLive(
-        `${settings.userName} attached a file named "${safeName}" with type "${fileType}". Acknowledge it normally. If you cannot actually parse the file contents from the current runtime, say that clearly and ask for readable text or backend parsing.`
-      );
+      if (
+        previewKind === 'text' ||
+        previewKind === 'json' ||
+        previewKind === 'csv' ||
+        previewKind === 'html' ||
+        fileType.startsWith('text/')
+      ) {
+        textPreview = await file.text().catch(() => '');
+      }
+
+      attachedFilesRef.current[fileId] = {
+        id: fileId,
+        name: safeName,
+        mimeType: fileType,
+        size: file.size,
+        dataUrl,
+        base64,
+        previewKind,
+        textPreview,
+      };
+      lastAttachedFileIdRef.current = fileId;
+
+      saveMessage('user', `[Attached file: ${safeName}]`, {
+        fileName: safeName,
+        fileType,
+        previewKind,
+        previewData: dataUrl,
+        previewMimeType: fileType,
+        previewTitle: safeName,
+        previewFilename: safeName,
+        downloadData: dataUrl,
+        downloadFilename: safeName,
+        htmlPreviewData: previewKind === 'html' ? dataUrl : undefined,
+        htmlPreviewFilename: previewKind === 'html' ? safeName : undefined,
+      });
+
+      updateLiveTranscript('user', `Attached file: ${safeName}`, 3000);
+
+      if (sessionRef.current) {
+        sendTextToLive(
+          `${settings.userName} attached a file.
+
+Attachment id: ${fileId}
+File name: ${safeName}
+MIME type: ${fileType}
+Size: ${file.size} bytes
+Preview kind: ${previewKind}
+
+The actual file content is available in the app runtime. If the user asks to inspect, read, summarize, transcribe, extract text, check the image, check the video, check the audio, or analyze this attachment, call analyze_uploaded_file with fileId "${fileId}". Do not say you can only see the filename. You may briefly acknowledge: "Yes, I received it. Tell me what you want me to check."`
+        );
+      } else {
+        updateLiveTranscript('model', `${settings.agentName} is not connected yet. Start the live session first, then I can inspect it.`, 3400);
+      }
+    } catch (error: any) {
+      console.error(error);
+      saveMessage('model', `I received the file, but I could not load its contents here: ${error?.message || error}`);
+      updateLiveTranscript('model', 'I received the file, but I could not load its contents properly.', 3400);
     }
   };
 
@@ -3349,6 +3933,8 @@ function BeatriceAgent({
                         )}
 
                         {msg.text}
+
+                        <ChatPreviewBlock msg={msg} />
 
                         {msg.htmlPreviewData && msg.htmlPreviewFilename && (
                           <div className="mt-3 grid grid-cols-1 gap-2">
